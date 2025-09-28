@@ -57,6 +57,7 @@ const config = {
         wagSpeed: 0.2,        // Velocidad del balanceo lateral
         undulationAmount: 2.0, // Amplitud de la ondulación del cuerpo
         undulationSpeed: 0.2,  // Velocidad de la ondulación del cuerpo
+        whipAmount: 2.0,       // Amplitud del "latigazo" vertical de la cola al moverse
     },
     pincers: {
         openAngle: 0.6,     // Ángulo de apertura de la pinza
@@ -662,8 +663,8 @@ class Scorpion {
             const t = i / this.spinePoints.length;
             
             // Fórmula de ancho modificada para asegurar que la cola tenga un grosor mínimo.
-            const width1 = Math.max(1.0, (3.0 - Math.pow(t, 0.6) * 4.0) * 3.5);
-            const width2 = Math.max(1.0, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 3.5);
+            const width1 = Math.max(1.5, (3.0 - Math.pow(t, 0.6) * 4.0) * 4.5);
+            const width2 = Math.max(1.5, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 4.5);
 
             if (width1 < 0.5) continue;
 
@@ -840,29 +841,37 @@ class Scorpion {
         this.ctx.restore();
     }
 
-    _drawStinger(x, y, angle) {
+    _drawStinger(baseX, baseY, angle) {
         this.ctx.save();
-        
+
         let strikeAngleOffset = 0;
         if (this.isStriking) {
             const strikePhase = this.strikeProgress / this.config.strike.duration;
             strikeAngleOffset = Math.sin(strikePhase * Math.PI) * this.config.strike.angleOffset;
         }
         const finalAngle = angle + strikeAngleOffset;
+        
+        // --- NUEVA LÓGICA PARA FORMA DE AGUIJÓN AMENAZANTE ---
+        const bulbRadius = 8;
+        const stingerLength = 22;
+        const stingerCurve = 0.8; // Curvatura de la púa
 
-        const bulbSize = 7;
-        const barbLength = 15;
-        const barbAngleOffset = 0.4;
+        // Centro del bulbo, ligeramente desplazado hacia atrás desde la punta de la cola
+        const bulbCenterX = baseX - 3 * Math.cos(finalAngle);
+        const bulbCenterY = baseY - 3 * Math.sin(finalAngle);
 
-        const p1 = { x: x, y: y };
-        const p2 = { x: x + bulbSize * Math.cos(finalAngle - Math.PI / 2), y: y + bulbSize * Math.sin(finalAngle - Math.PI / 2) };
-        const p3 = { x: x + barbLength * Math.cos(finalAngle + barbAngleOffset), y: y + barbLength * Math.sin(finalAngle + barbAngleOffset) };
-        const p4 = { x: x + bulbSize * Math.cos(finalAngle + Math.PI / 2), y: y + bulbSize * Math.sin(finalAngle + Math.PI / 2) };
+        // Punta de la púa
+        const tipX = bulbCenterX + stingerLength * Math.cos(finalAngle + stingerCurve);
+        const tipY = bulbCenterY + stingerLength * Math.sin(finalAngle + stingerCurve);
+
+        // Punto de control para la curva de la púa
+        const controlX = bulbCenterX + stingerLength * 0.5 * Math.cos(finalAngle + stingerCurve * 0.5);
+        const controlY = bulbCenterY + stingerLength * 0.5 * Math.sin(finalAngle + stingerCurve * 0.5);
 
         this.ctx.beginPath();
-        this.ctx.moveTo(p1.x, p1.y);
-        this.ctx.quadraticCurveTo(p2.x, p2.y, p3.x, p3.y);
-        this.ctx.quadraticCurveTo(p4.x, p4.y, p1.x, p1.y);
+        this.ctx.arc(bulbCenterX, bulbCenterY, bulbRadius, finalAngle - Math.PI / 2, finalAngle + Math.PI / 2);
+        this.ctx.quadraticCurveTo(controlX, controlY, tipX, tipY);
+        this.ctx.closePath();
         
         this.ctx.fillStyle = this.ctx.strokeStyle;
         this.ctx.fill();
@@ -870,6 +879,7 @@ class Scorpion {
 
         this.ctx.restore();
     }
+    // --- FIN DE LA LÓGICA DEL AGUIJÓN ---
 }
 
 // --- Inicio ---
