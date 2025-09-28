@@ -22,12 +22,13 @@ const config = {
         }
     },
     legs: {
-        indices: [2, 5, 8, 11],
+        indices: [2, 5, 8, 11], // 4 pares de patas = 8 patas en total
+        angles: [1.1, 1.3, 1.5, 1.7], // Ángulos distintos para cada par de patas
         naturalLength: 50,
-        angle: 1.3,
-        segment1: 25, 
+        legWidth: 4.5, // Grosor base de la pata
+        segment1: 30, 
         segment2: 25, 
-        segment3: 20, 
+        segment3: 15, 
         stepThreshold: 35, // Pasos más largos y deliberados
         stepDuration: 18,  // Pasos más rápidos y firmes
         stepLift: 15,
@@ -196,12 +197,13 @@ class Particle {
 }
 
 class Leg {
-    constructor(spineIndex, side, gaitGroup, initialBodyPoint, initialBodyAngle, config) {
+    constructor(spineIndex, side, gaitGroup, initialBodyPoint, initialBodyAngle, config, angle) {
         this.spineIndex = spineIndex;
         this.side = side;
         this.gaitGroup = gaitGroup;
         this.config = config;
-
+        this.angle = angle; // Ángulo específico para este par de patas
+        
         const naturalPos = this._getNaturalRestingPos(initialBodyPoint, initialBodyAngle, 1.0);
         this.footPos = { x: naturalPos.x, y: naturalPos.y };
         
@@ -213,7 +215,7 @@ class Leg {
     }
 
     _getNaturalRestingPos(bodyPoint, bodyAngle, scale) {
-        const angle = bodyAngle + this.side * this.config.angle;
+        const angle = bodyAngle + this.side * this.angle;
         const len = this.config.naturalLength * scale;
         return {
             x: bodyPoint.x + len * Math.cos(angle),
@@ -271,7 +273,6 @@ class Leg {
 
     draw(ctx, bodyPoint, hue, colorConfig) {
         ctx.save();
-        ctx.lineWidth = 0.9;
         
         const startX = bodyPoint.x;
         const startY = bodyPoint.y;
@@ -309,16 +310,27 @@ class Leg {
             jointY = startY + seg1_len * Math.sin(jointAngle);
         }
 
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(jointX, jointY); 
-
         const leg_seg2_angle = Math.atan2(footY - jointY, footX - jointX);
         const leg_seg2_len = this.config.segment2;
         const joint2X = jointX + leg_seg2_len * Math.cos(leg_seg2_angle);
         const joint2Y = jointY + leg_seg2_len * Math.sin(leg_seg2_angle);
         
-        ctx.lineTo(joint2X, joint2Y); 
+        // --- LÓGICA DE DIBUJO DE PATAS MÁS DELGADAS Y ARTICULADAS ---
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        ctx.lineWidth = this.config.legWidth; // Segmento más grueso
+        ctx.lineTo(jointX, jointY);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(jointX, jointY);
+        ctx.lineWidth = this.config.legWidth * 0.7; // Segmento intermedio
+        ctx.lineTo(joint2X, joint2Y);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(joint2X, joint2Y);
+        ctx.lineWidth = this.config.legWidth * 0.4; // Segmento más fino
         ctx.lineTo(footX, footY); 
         ctx.stroke();
         
@@ -403,15 +415,15 @@ class Scorpion {
     _initLegs() {
         this.legs = [];
         let legCounter = 0;
-        this.config.legs.indices.forEach((spineIndex) => {
+        this.config.legs.indices.forEach((spineIndex, i) => {
             for (let side = -1; side <= 1; side += 2) {
                 const bodyPoint = this.spinePoints[spineIndex];
                 let bodyAngle = 0;
                 if (this.spinePoints.length > spineIndex + 1) {
                     bodyAngle = Math.atan2(this.spinePoints[spineIndex+1].y - bodyPoint.y, this.spinePoints[spineIndex+1].x - bodyPoint.x);
                 }
-                
-                this.legs.push(new Leg(spineIndex, side, legCounter % 2, bodyPoint, bodyAngle, this.config.legs));
+                const legAngle = this.config.legs.angles[i];
+                this.legs.push(new Leg(spineIndex, side, legCounter % 2, bodyPoint, bodyAngle, this.config.legs, legAngle));
                 legCounter++;
             }
         });
