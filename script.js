@@ -68,9 +68,9 @@ const config = {
         closedAngle: 0.05,  // Ángulo de cierre
         lengthA: 25,        // Longitud del primer segmento del brazo (hombro a codo)
         lengthB: 25,        // Longitud del segundo segmento del brazo (codo a mano)
-        lengthFinger: 34,   // Longitud de los dedos
+        lengthFinger: 38,   // Longitud de los dedos (AUMENTADO)
         armWidth: 12,       // Grosor del brazo
-        handWidth: 20,      // "Mano" mucho más ancha y bulbosa
+        handWidth: 22,      // "Mano" mucho más ancha y bulbosa (AUMENTADO)
         snapDistance: 80,   // Distancia a la que reaccionan al cursor
         snapLerpFactor: 0.1, // Velocidad con la que se cierran/abren
     },
@@ -1154,24 +1154,33 @@ class Scorpion {
             this.ctx.fill();
             this.ctx.stroke();
     
+            // --- LÓGICA DE DIBUJO DE PINZAS MEJORADA ---
             const handAngle = Math.atan2(handY - elbowY, handX - elbowX);
             const fingerLength = this.config.pincers.lengthFinger;
     
+            // Pinza móvil: más curvada y con punta afilada
             const mobileClawAngle = handAngle + (side * this.pincerAngle);
             const mobileClawEndX = handX + fingerLength * Math.cos(mobileClawAngle);
             const mobileClawEndY = handY + fingerLength * Math.sin(mobileClawAngle);
-            const mobileClawControlX = handX + fingerLength * 0.5 * Math.cos(mobileClawAngle + side * 0.2);
-            const mobileClawControlY = handY + fingerLength * 0.5 * Math.sin(mobileClawAngle + side * 0.2);
+            const mobileClawControl1X = handX + fingerLength * 0.4 * Math.cos(mobileClawAngle + side * 0.1);
+            const mobileClawControl1Y = handY + fingerLength * 0.4 * Math.sin(mobileClawAngle + side * 0.1);
+            const mobileClawControl2X = handX + fingerLength * 0.8 * Math.cos(mobileClawAngle + side * 0.3);
+            const mobileClawControl2Y = handY + fingerLength * 0.8 * Math.sin(mobileClawAngle + side * 0.3);
     
+            // Pinza fija: con un "diente" y punta más definida
             const fixedClawAngle = handAngle - (side * 0.4); 
             const fixedClawEndX = handX + fingerLength * 0.9 * Math.cos(fixedClawAngle);
             const fixedClawEndY = handY + fingerLength * 0.9 * Math.sin(fixedClawAngle);
-            const fixedClawControlX = handX + fingerLength * 0.4 * Math.cos(fixedClawAngle - side * 0.4);
-            const fixedClawControlY = handY + fingerLength * 0.4 * Math.sin(fixedClawAngle - side * 0.4);
+            const fixedClawControl1X = handX + fingerLength * 0.3 * Math.cos(fixedClawAngle - side * 0.1);
+            const fixedClawControl1Y = handY + fingerLength * 0.3 * Math.sin(fixedClawAngle - side * 0.1);
+            const fixedClawControl2X = handX + fingerLength * 0.7 * Math.cos(fixedClawAngle - side * 0.3);
+            const fixedClawControl2Y = handY + fingerLength * 0.7 * Math.sin(fixedClawAngle - side * 0.3);
             
             this.ctx.beginPath();
-            this.ctx.moveTo(handX, handY); this.ctx.quadraticCurveTo(mobileClawControlX, mobileClawControlY, mobileClawEndX, mobileClawEndY);
-            this.ctx.moveTo(handX, handY); this.ctx.quadraticCurveTo(fixedClawControlX, fixedClawControlY, fixedClawEndX, fixedClawEndY);
+            this.ctx.moveTo(handX, handY); 
+            this.ctx.bezierCurveTo(mobileClawControl1X, mobileClawControl1Y, mobileClawControl2X, mobileClawControl2Y, mobileClawEndX, mobileClawEndY);
+            this.ctx.moveTo(handX, handY); 
+            this.ctx.bezierCurveTo(fixedClawControl1X, fixedClawControl1Y, fixedClawControl2X, fixedClawControl2Y, fixedClawEndX, fixedClawEndY);
             this.ctx.lineWidth = 4.5;
             this.ctx.stroke();
 
