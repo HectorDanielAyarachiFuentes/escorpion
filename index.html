@@ -955,7 +955,7 @@
             // --- Event Listeners ---
             const getMousePos = (e) => {
                 const rect = canvas.getBoundingClientRect();
-                let clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                let clientX = e.touches ? e.touches[0].clientX : e.clientX; // Usa el primer toque o el ratón
                 let clientY = e.touches ? e.touches[0].clientY : e.clientY;
                 return {
                     x: (clientX - rect.left),
@@ -964,15 +964,15 @@
             };
 
             const handleMove = (e) => {
-                if (e.type === 'touchmove') e.preventDefault();
+                if (e.type === 'touchmove') e.preventDefault(); // Previene el scroll en móviles
                 const { x, y } = getMousePos(e);
                 scorpion.updateMouse(x, y);
             };
 
-            const handleClick = () => scorpion.startStrike();
+            const handleClick = () => scorpion.startStrike(); // Función para el ataque
 
             const handleGrab = (e) => {
-                if (e.type === 'touchstart') {
+                if (e.type === 'touchstart') { // Para el toque, actualiza la posición antes de agarrar
                     e.preventDefault();
                     const { x, y } = getMousePos(e);
                     scorpion.updateMouse(x, y);
@@ -981,13 +981,13 @@
             };
 
             const handleRelease = (e) => {
-                if (e.type === 'touchend') e.preventDefault();
+                if (e.type === 'touchend') e.preventDefault(); // Previene eventos fantasma
                 
                 // Si se suelta después de arrastrar, no atacar. Si no, es un toque/clic.
                 if (scorpion.isGrabbed) {
                     scorpion.endGrab();
                 } else {
-                    handleClick();
+                    handleClick(); // Si no se arrastró, es un toque/clic para atacar
                 }
             };
 
@@ -995,10 +995,10 @@
             canvas.addEventListener('touchmove', handleMove, { passive: false });
 
             canvas.addEventListener('mousedown', handleGrab);
-            canvas.addEventListener('touchstart', handleGrab, { passive: false });
+            canvas.addEventListener('touchstart', handleGrab, { passive: false }); // Inicia el agarre
 
             canvas.addEventListener('mouseup', handleRelease);
-            canvas.addEventListener('touchend', handleRelease, { passive: false });
+            canvas.addEventListener('touchend', handleRelease, { passive: false }); // Suelta o ataca
 
             loop();
         }
