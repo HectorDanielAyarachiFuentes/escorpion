@@ -393,6 +393,7 @@ class Scorpion {
 
         this.particles = [];
         this._initLegs();
+        this._updatePincerPhysics(); // Asegura que las pinzas tengan una posición inicial
     }
 
     _initLegs() {
@@ -500,7 +501,7 @@ class Scorpion {
                 type: 'pincer',
                 sideKey: sideKey,
                 homeAnchor: { ...this.spinePoints[1] },
-                homeJoints: JSON.parse(JSON.stringify(joints)), // Deep copy
+                homeJoints: JSON.parse(JSON.stringify(joints)), // CORRECCIÓN: Asegurar una copia profunda correcta
                 targetPos: { x: center.x + dist * Math.cos(angle), y: center.y + dist * Math.sin(angle) }
             });
         });
@@ -539,13 +540,11 @@ class Scorpion {
             if (this.isDeconstructing) {
                 this.isDeconstructing = false;
                 this.isDeconstructed = true;
-                document.getElementById('deconstructBtn').innerText = 'Armar';
             }
             if (this.isReconstructing) {
                 this.isReconstructing = false;
                 this.isDeconstructed = false;
                 this.deconstructedParts = []; // Limpiar estado
-                document.getElementById('deconstructBtn').innerText = 'Desarmar';
             }
         }
     }
@@ -1282,7 +1281,12 @@ function setup() {
     canvas.addEventListener('mouseup', handleRelease);
     canvas.addEventListener('touchend', handleRelease, { passive: false }); // Suelta o ataca
 
-    document.getElementById('deconstructBtn').addEventListener('click', () => scorpion.toggleDeconstruction());
+    // Nuevo listener para la tecla 'D'
+    window.addEventListener('keydown', (e) => {
+        if (e.key.toLowerCase() === 'd') {
+            scorpion.toggleDeconstruction();
+        }
+    });
 
     loop();
 }
