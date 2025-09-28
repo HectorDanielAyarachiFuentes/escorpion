@@ -3,7 +3,7 @@ const ctx = canvas.getContext('2d');
 
 // --- Configuración ---
 const config = {
-    numSpinePoints: 80,
+    numSpinePoints: 90,
     segmentLength: 4.0,
     maxSpeed: 5.5,
     physicsIterations: 5,
@@ -29,7 +29,7 @@ const config = {
         segment1: 30, 
         segment2: 25, 
         segment3: 15, 
-        stepThreshold: 35, // Pasos más largos y deliberados
+        stepThreshold: 30, // Pasos más largos y deliberados (REDUCIDO para más reactividad)
         stepDuration: 18,  // Pasos más rápidos y firmes
         stepLift: 15,
         stepPredictionFrames: 12,      // Cuántos frames hacia el futuro predecir el paso.
@@ -40,7 +40,7 @@ const config = {
         grabRadius: 20, 
         spineDrag: 0.9, 
         slowdownRadius: 60, 
-        turnSway: 0.2, 
+        turnSway: 0.4, // AUMENTADO para un contoneo más pronunciado al girar
     },
     strike: {
         duration: 25,
@@ -50,7 +50,7 @@ const config = {
         stingerLength: 22,
         idleWiggleSpeed: 0.05,
         idleWiggleAmount: 0.15,
-        curl: 5.0, // Factor de altura de la curva de la cola (AUMENTADO)
+        curl: 6.0, // Factor de altura de la curva de la cola (AUMENTADO)
         curlStartSegment: 15, // Segmento donde empieza a curvarse (REDUCIDO)
         // --- Nuevos parámetros para movimiento orgánico ---
         speedCurlFactor: 1.5, // Cuánto se estira la cola al moverse rápido
@@ -245,8 +245,9 @@ class Leg {
             if (this.stepProgress >= this.currentStepDuration) {                        
                 this.isStepping = false;
             }
-        } else {
-            if (distFromNatural > this.config.stepThreshold && canStep && !isGrabbed && headSpeed > 0.2) {
+        } else { // --- LÓGICA DE PASO MEJORADA ---
+            // Se elimina la condición `headSpeed > 0.2` para permitir que las patas se reajusten incluso en reposo.
+            if (distFromNatural > this.config.stepThreshold && canStep && !isGrabbed) {
                 this.isStepping = true;
                 this.stepProgress = 0;
                 Object.assign(this.stepStartPos, this.footPos);
@@ -763,22 +764,30 @@ class Scorpion {
     }
 
     _updatePincerPhysics() {
-        const lerpFactor = 0.2; // Controla la suavidad/retraso del brazo
+        const lerpFactor = 0.2; 
 
         for (let side = -1; side <= 1; side += 2) {
             const sideKey = side === -1 ? 'left' : 'right';
             if (!this.pincerJoints[sideKey]) {
                 this.pincerJoints[sideKey] = { elbow: {x: 0, y: 0}, hand: {x: 0, y: 0} };
             }
-
             const anchorPoint = this.spinePoints[1];
 
-            // Calcular posiciones objetivo
+            // --- LÓGICA DE PINZAS MEJORADA: SEGUIMIENTO SUTIL DEL CURSOR ---
+            // El objetivo de la pinza ahora es una mezcla entre la posición neutral y la dirección del cursor.
+            const targetToMouseAngle = Math.atan2(this.mouse.y - anchorPoint.y, this.mouse.x - anchorPoint.x);
+            const baseAngle = this.headAngle;
+            
+            // Mezcla el ángulo base con el ángulo hacia el ratón
+            let angleDiff = (targetToMouseAngle - baseAngle + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+            const finalTargetAngle = baseAngle + angleDiff * 0.1; // 0.1 = factor de "interés" en el cursor
+
+            // Calcular posiciones objetivo basadas en el nuevo ángulo
             const targetAngleA = this.headAngle + side * 1.2;
             const targetElbowX = anchorPoint.x + this.config.pincers.lengthA * Math.cos(targetAngleA);
             const targetElbowY = anchorPoint.y + this.config.pincers.lengthA * Math.sin(targetAngleA);
-
-            const targetAngleB = this.headAngle + side * 0.5;
+            
+            const targetAngleB = finalTargetAngle + side * 0.5; // El brazo se orienta hacia el objetivo
             const targetHandX = targetElbowX + this.config.pincers.lengthB * Math.cos(targetAngleB);
             const targetHandY = targetElbowY + this.config.pincers.lengthB * Math.sin(targetAngleB);
 
@@ -1219,35 +1228,43 @@ class Scorpion {
         }
         const finalAngle = angle + strikeAngleOffset;
         
-        // --- NUEVA LÓGICA PARA FORMA DE AGUIJÓN AMENAZANTE ---
-        const bulbRadius = 9;
-        const stingerLength = 28; // Más largo
-        const stingerCurve = 0.9; // Más curvado
+        // --- LÓGICA DE AGUIJÓN REDISEÑADA: MÁS AFILADO Y DETALLADO ---
+        const bulbRadius = 10;
+        const stingerLength = 35; // Aún más largo para un aspecto afilado
+        const stingerCurve = 1.1; // Curva más pronunciada
 
-        // Bulbo
+        // El centro del bulbo se desplaza ligeramente para una mejor conexión visual
         const bulbCenterX = baseX - 4 * Math.cos(finalAngle);
         const bulbCenterY = baseY - 4 * Math.sin(finalAngle);
+
+        // Dibujar el bulbo con una forma más orgánica usando curvas de Bézier
+        const bulbAngle1 = finalAngle - Math.PI / 1.8;
+        const bulbAngle2 = finalAngle + Math.PI / 1.8;
+        const p1 = { x: bulbCenterX + bulbRadius * Math.cos(bulbAngle1), y: bulbCenterY + bulbRadius * Math.sin(bulbAngle1) };
+        const p2 = { x: bulbCenterX + bulbRadius * Math.cos(bulbAngle2), y: bulbCenterY + bulbRadius * Math.sin(bulbAngle2) };
+        const controlDist = bulbRadius * 1.2;
+        const controlPoint = { x: bulbCenterX + controlDist * Math.cos(finalAngle - Math.PI), y: bulbCenterY + controlDist * Math.sin(finalAngle - Math.PI) };
+        
         this.ctx.beginPath();
-        this.ctx.arc(bulbCenterX, bulbCenterY, bulbRadius, finalAngle - Math.PI / 2.2, finalAngle + Math.PI / 2.2);
+        this.ctx.moveTo(p1.x, p1.y);
+        this.ctx.quadraticCurveTo(controlPoint.x, controlPoint.y, p2.x, p2.y);
         this.ctx.closePath();
         this.ctx.fillStyle = this.ctx.strokeStyle;
         this.ctx.fill();
         this.ctx.stroke();
 
-        // Púa principal
+        // Púa principal: más larga y delgada
         const tipX = bulbCenterX + stingerLength * Math.cos(finalAngle + stingerCurve);
         const tipY = bulbCenterY + stingerLength * Math.sin(finalAngle + stingerCurve);
-        const controlX = bulbCenterX + stingerLength * 0.5 * Math.cos(finalAngle + stingerCurve * 0.5);
-        const controlY = bulbCenterY + stingerLength * 0.5 * Math.sin(finalAngle + stingerCurve * 0.5);
-        const baseOffsetX = bulbRadius * 0.6 * Math.cos(finalAngle + Math.PI / 2);
-        const baseOffsetY = bulbRadius * 0.6 * Math.sin(finalAngle + Math.PI / 2);
+        const controlX = bulbCenterX + stingerLength * 0.5 * Math.cos(finalAngle + stingerCurve * 0.6);
+        const controlY = bulbCenterY + stingerLength * 0.5 * Math.sin(finalAngle + stingerCurve * 0.6);
         this.ctx.beginPath();
-        this.ctx.moveTo(bulbCenterX + baseOffsetX, bulbCenterY + baseOffsetY);
+        this.ctx.moveTo(p1.x, p1.y);
         this.ctx.quadraticCurveTo(controlX, controlY, tipX, tipY);
-        this.ctx.lineTo(bulbCenterX - baseOffsetX, bulbCenterY - baseOffsetY);
+        this.ctx.lineTo(p2.x, p2.y);
         this.ctx.stroke();
 
-        // Púa secundaria (detalle)
+        // Púa secundaria (detalle sutil)
         const subStingerLength = 10;
         const subStingerAngle = finalAngle - 0.5;
         const subTipX = bulbCenterX + subStingerLength * Math.cos(subStingerAngle);
@@ -1257,7 +1274,6 @@ class Scorpion {
         this.ctx.lineTo(subTipX, subTipY);
         this.ctx.lineWidth = 2;
         this.ctx.stroke();
-
         this.ctx.restore();
     }
     // --- FIN DE LA LÓGICA DEL AGUIJÓN ---
