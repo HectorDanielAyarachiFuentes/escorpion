@@ -49,8 +49,8 @@ const config = {
         stingerLength: 22,
         idleWiggleSpeed: 0.05,
         idleWiggleAmount: 0.15,
-        curl: 2.5, // Factor de altura de la curva de la cola
-        curlStartSegment: 20, // Segmento donde empieza a curvarse
+        curl: 4.0, // Factor de altura de la curva de la cola (AUMENTADO)
+        curlStartSegment: 15, // Segmento donde empieza a curvarse (REDUCIDO)
         // --- Nuevos parámetros para movimiento orgánico ---
         speedCurlFactor: 1.5, // Cuánto se estira la cola al moverse rápido
         wagAmount: 1.2,       // Amplitud del balanceo lateral de la cola al moverse
@@ -493,22 +493,15 @@ class Scorpion {
     }
 
     _updateSpinePhysics() {
+        // Primero, aplicamos el movimiento secundario (balanceo, ondulación)
         for (let i = 1; i < this.spinePoints.length; i++) {
             const currentPoint = this.spinePoints[i];
-            const prevPoint = this.spinePoints[i - 1];
             const t = i / this.spinePoints.length;
-            const dynamicDrag = this.config.movement.spineDrag + (1 - this.config.movement.spineDrag) * t * 0.8;
-
-            if (this.headSpeed > 0.2) {
-                const targetX = prevPoint.x + Math.cos(this.headAngle) * this.config.segmentLength;
-                const targetY = prevPoint.y + Math.sin(this.headAngle) * this.config.segmentLength;
-                currentPoint.x = currentPoint.x * dynamicDrag + targetX * (1 - dynamicDrag);
-                currentPoint.y = currentPoint.y * dynamicDrag + targetY * (1 - dynamicDrag);
-            }
-
+            
             const sway = Math.sin(t * Math.PI) * this.headAngularVelocity * this.config.movement.turnSway * i;
             const idleWiggle = this.headSpeed < 0.2 ? Math.sin(this.animationFrame * this.config.tail.idleWiggleSpeed + i * 0.3) * this.config.tail.idleWiggleAmount * (1 - t) : 0;
             const wiggleAngle = this.headAngle + Math.PI / 2;
+
             currentPoint.x += Math.cos(wiggleAngle) * (sway + idleWiggle);
             currentPoint.y += Math.sin(wiggleAngle) * (sway + idleWiggle);
 
@@ -522,34 +515,43 @@ class Scorpion {
             currentPoint.y += Math.sin(undulationPhase) * undulationAmplitude;
         }
 
+        // Luego, ejecutamos el bucle de física para mantener la estructura
         for (let j = 0; j < this.config.physicsIterations; j++) {
             if (this.isGrabbed && this.grabbedPointIndex !== -1) {
                 this.spinePoints[this.grabbedPointIndex].x = this.mouse.x;
                 this.spinePoints[this.grabbedPointIndex].y = this.mouse.y;
             }
+
+            // 1. Forzamos a la cola a curvarse sobre el cuerpo hacia un objetivo
+            const head = this.spinePoints[0];
+            // El objetivo está por encima y ligeramente por delante de la cabeza
+            const targetX = head.x + Math.cos(this.headAngle) * 25; // Un poco menos hacia adelante
+            const targetY = head.y + Math.sin(this.headAngle) * 25 - 80; // Más elevado para dar margen
+
+            for (let i = this.config.tail.curlStartSegment; i < this.spinePoints.length; i++) {
+                const point = this.spinePoints[i];
+                const progress = (i - this.config.tail.curlStartSegment) / (this.spinePoints.length - this.config.tail.curlStartSegment);
+                const pullFactor = 0.05 * Math.pow(progress, 2); // La fuerza es mayor al final de la cola
+                
+                point.x += (targetX - point.x) * pullFactor;
+                point.y += (targetY - point.y) * pullFactor;
+            }
+
+            // 2. Propagamos la posición desde la cabeza hacia la cola para mantener la distancia (restricción de cuerda)
             for (let i = 1; i < this.spinePoints.length; i++) {
                 const currentPoint = this.spinePoints[i];
                 const prevPoint = this.spinePoints[i-1];
-                let targetX, targetY;
-
-                if (i > this.config.tail.curlStartSegment) {
-                    const speedFactor = Math.min(this.headSpeed / this.config.maxSpeed, 1.0);
-                    const dynamicCurl = this.config.tail.curl - (speedFactor * this.config.tail.speedCurlFactor);
-                    const tailProgress = (i - this.config.tail.curlStartSegment) / (this.spinePoints.length - this.config.tail.curlStartSegment);
-                    const curlAngleOffset = Math.pow(tailProgress, 1.5) * (dynamicCurl / 100);
-                    
-                    const angleFromPrev = Math.atan2(currentPoint.y - prevPoint.y, currentPoint.x - prevPoint.x);
-                    const targetAngle = angleFromPrev - curlAngleOffset;
-                    targetX = prevPoint.x + Math.cos(targetAngle) * this.config.segmentLength;
-                    targetY = prevPoint.y + Math.sin(targetAngle) * this.config.segmentLength;
-                } else {
-                    const angle = Math.atan2(currentPoint.y - prevPoint.y, currentPoint.x - prevPoint.x);
-                    targetX = prevPoint.x + Math.cos(angle) * this.config.segmentLength;
-                    targetY = prevPoint.y + Math.sin(angle) * this.config.segmentLength;
-                }
                 
-                currentPoint.x += (targetX - currentPoint.x) * 0.5;
-                currentPoint.y += (targetY - currentPoint.y) * 0.5;
+                const dx = currentPoint.x - prevPoint.x;
+                const dy = currentPoint.y - prevPoint.y;
+                const dist = Math.hypot(dx, dy);
+                if (dist > 0) {
+                    const diff = (dist - this.config.segmentLength) / dist;
+                    // Solo movemos el punto actual, no el anterior (prevPoint).
+                    // Esto evita que la cola "tire" de la cabeza hacia atrás.
+                    currentPoint.x -= dx * diff;
+                    currentPoint.y -= dy * diff;
+                }
             }
         }
     }
