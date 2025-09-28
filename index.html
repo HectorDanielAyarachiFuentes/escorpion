@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Esqueleto de Escorpión Interactivo</title>
+    <style>
+        /*
+          Reseteo y configuración base para asegurar que la página ocupe toda la ventana
+          sin márgenes ni barras de scroll.
+        */
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+        }
+
+        /*
+          Estilos específicos para el body: fondo, tipografía y cursor.
+        */
+        body {
+            background: #000000;
+            font-family: 'Inter', sans-serif, system-ui;
+            cursor: pointer;
+            color: white;
+        }
+
+        /*
+          Estilos para el elemento canvas.
+        */
+        canvas {
+            background-color: transparent;
+            /* Hacemos que el canvas ocupe toda la pantalla y se superponga */
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        /*
+          Estilos para el texto de instrucciones.
+        */
+        #instructions {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 14px;
+            pointer-events: none; /* Asegura que el texto no interfiera con los eventos del canvas */
+        }
+    </style>
+</head>
+<body>
+    <div id="instructions">Mueve el cursor para guiarlo. Haz clic sobre él para arrastrarlo.</div>
+    <canvas id="scorpionCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('scorpionCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- Configuración ---
+        const config = {
+            numSpinePoints: 70,
+            segmentLength: 4.0,
+            maxSpeed: 5.5,
+            physicsIterations: 10,
+            // --- Nuevas configuraciones centralizadas ---
+            head: {
+                size: 5.5,
+                widthFactor: 6.0,
+                lengthFactor: 3.0,
+            },
+            legs: {
+                indices: [2, 5, 8, 11],
+                naturalLength: 50,
+                angle: 1.3,
+                segment1: 25, 
+                segment2: 25, 
+                segment3: 20, 
+                stepThreshold: 35, // Pasos más largos y deliberados
+                stepDuration: 18,  // Pasos más rápidos y firmes
+                stepLift: 15,
+                stepPrediction: 8,
+                maxStepPredictionDistance: 60,
+            },
+            movement: {
+                walkSpeed: 1.2, // Ligeramente más lento para que coincida con los pasos
+                grabRadius: 20, 
+                spineDrag: 0.9, 
+                slowdownRadius: 60, 
+                turnSway: 0.2, 
+            },
+            strike: {
+                duration: 25,
+                angleOffset: -1.5,
+            },
+            tail: {
+                stingerLength: 22,
+                idleWiggleSpeed: 0.05,
+                idleWiggleAmount: 0.15,
+                curl: 2.5, // Factor de altura de la curva de la cola
+                curlStartSegment: 20, // Segmento donde empieza a curvarse
+            },
+            // --- Configuración de partículas ---
+            particles: {
+                count: 20,
+                minLife: 15,
+                maxLife: 30,
+                minSpeed: 2,
+                maxSpeed: 5,
+            },
+            // --- Configuración de color dinámico ---
+            color: {
+                initialHue: 200,    
+                saturation: 90,     
+                lightness: 80,      
+                glowLightness: 50,  
+                hueChangeSpeed: 0.1, 
+                glowBlur: 12,
+            }
+        };
+
+        // --- Estado de la Animación (agrupado) ---
+        const dpr = window.devicePixelRatio || 1;
+        let animationFrame = 0;
+
+        const state = {
+            mouse: { x: 0, y: 0 },
+            targetPos: { x: 0, y: 0 },
+            spinePoints: [],
+            headSpeed: 0,
+            legs: [],
+            isStriking: false,
+            strikeProgress: 0,
+            strikeTarget: { x: 0, y: 0 },
+            lastHeadAngle: 0, 
+            currentHue: 0, 
+            particles: [],
+            isGrabbed: false,
+            grabbedPointIndex: -1,
+        };
+
+        function initAnimationState() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            state.mouse = { x: width / 2, y: height / 2 };
+            state.targetPos = { x: width / 2, y: height / 2 };
+            const headPos = { x: width / 2, y: height / 2 };
+            state.spinePoints = [];
+            for (let i = 0; i < config.numSpinePoints; i++) {
+                state.spinePoints.push({ x: headPos.x - i * config.segmentLength, y: headPos.y });
+            }
+            initLegs();
+            state.lastHeadAngle = 0;
+            state.currentHue = config.color.initialHue;
+            state.particles = [];
+        }
+
+        function initLegs() {
+            state.legs = [];
+            let legCounter = 0;
+            config.legs.indices.forEach((spineIndex) => {
+                for (let side = -1; side <= 1; side += 2) {
+                    const bodyPoint = state.spinePoints[spineIndex];
+                    let bodyAngle = 0;
+                    if (state.spinePoints.length > spineIndex + 1) {
+                        bodyAngle = Math.atan2(state.spinePoints[spineIndex+1].y - bodyPoint.y, state.spinePoints[spineIndex+1].x - bodyPoint.x);
+                    }
+
+                    const naturalPos = getLegNaturalRestingPos(bodyPoint, bodyAngle, side, 1.0);
+                    
+                    state.legs.push({
+                        spineIndex: spineIndex,
+                        side: side,
+                        footPos: { x: naturalPos.x, y: naturalPos.y },
+                        isStepping: false,
+                        stepProgress: 0,
+                        stepStartPos: { x: 0, y: 0 },
+                        stepTargetPos: { x: 0, y: 0 },
+                        gaitGroup: legCounter % 2, 
+                        currentStepDuration: config.legs.stepDuration,
+                    });
+                    legCounter++;
+                }
+            });
+        }
+
+        function getLegNaturalRestingPos(bodyPoint, bodyAngle, side, scale) {
+            const angle = bodyAngle + side * config.legs.angle;
+            const len = config.legs.naturalLength * scale;
+            return {
+                x: bodyPoint.x + len * Math.cos(angle),
+                y: bodyPoint.y + len * Math.sin(angle),
+            }
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth * dpr;
+            canvas.height = window.innerHeight * dpr;
+            canvas.style.width = `${window.innerWidth}px`;
+            canvas.style.height = `${window.innerHeight}px`;
+            ctx.scale(dpr, dpr);
+            initAnimationState();
+        }
+
+        // --- Funciones de Dibujo ---
+
+        function drawVertebra(x, y, angle, size, hasRibs) {
+            ctx.beginPath();
+            ctx.arc(x, y, size * 0.7, 0, Math.PI * 2);
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            ctx.stroke();
+
+            if (hasRibs) {
+                const ribLength = size * 4.2;
+                const p1x = x + ribLength * Math.cos(angle - Math.PI / 2);
+                const p1y = y + ribLength * Math.sin(angle - Math.PI / 2);
+                const p2x = x + ribLength * Math.cos(angle + Math.PI / 2);
+                const p2y = y + ribLength * Math.sin(angle + Math.PI / 2);
+
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(p1x, p1y);
+                ctx.moveTo(x, y);
+                ctx.lineTo(p2x, p2y);
+                ctx.stroke();
+            }
+        }
+
+        function drawLegIK(bodyPoint, leg) {
+            ctx.save();
+            ctx.lineWidth = 0.9;
+            
+            const startX = bodyPoint.x;
+            const startY = bodyPoint.y;
+            let footX = leg.footPos.x;
+            let footY = leg.footPos.y;
+
+            let lift = 0;
+            if (leg.isStepping) {
+                lift = Math.sin(leg.stepProgress / leg.currentStepDuration * Math.PI) * config.legs.stepLift;
+            }
+
+            if (lift > 0.1) {
+                ctx.beginPath();
+                ctx.arc(footX, footY, 1.5, 0, Math.PI * 2); 
+                ctx.fillStyle = 'rgba(0,0,0,0.4)';
+                ctx.fill();
+            }
+            footY -= lift;
+
+            const seg1_len = config.legs.segment1; 
+            const seg2_len = config.legs.segment2 + config.legs.segment3;
+            const dist = Math.hypot(startX - footX, startY - footY);
+            const maxReach = seg1_len + seg2_len - 1;
+            let jointX, jointY;
+
+            if (dist >= maxReach) {
+                const angle = Math.atan2(footY - startY, footX - startX);
+                jointX = startX + seg1_len * Math.cos(angle);
+                jointY = startY + seg1_len * Math.sin(angle);
+            } else {
+                const angle_at_body = Math.acos((seg1_len**2 + dist**2 - seg2_len**2) / (2 * seg1_len * dist));
+                const angle_body_to_foot = Math.atan2(footY - startY, footX - startX);
+                const jointAngle = angle_body_to_foot + (angle_at_body * leg.side);
+                jointX = startX + seg1_len * Math.cos(jointAngle);
+                jointY = startY + seg1_len * Math.sin(jointAngle);
+            }
+
+            ctx.beginPath();
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.arc(startX, startY, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(jointX, jointY); 
+
+            const leg_seg2_angle = Math.atan2(footY - jointY, footX - jointX);
+            const leg_seg2_len = config.legs.segment2;
+            const joint2X = jointX + leg_seg2_len * Math.cos(leg_seg2_angle);
+            const joint2Y = jointY + leg_seg2_len * Math.sin(leg_seg2_angle);
+            
+            ctx.lineTo(joint2X, joint2Y); 
+            ctx.lineTo(footX, footY); 
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.arc(jointX, jointY, 1.2, 0, Math.PI * 2);
+            ctx.arc(joint2X, joint2Y, 1.0, 0, Math.PI * 2); 
+            ctx.fill();
+
+            ctx.restore();
+        }
+
+        function drawHead(x, y, angle, size) {
+            ctx.save();
+            ctx.beginPath();
+
+            const width = size * config.head.widthFactor;
+            const length = size * config.head.lengthFactor;
+            
+            const pFront = { x: length, y: 0 };
+            const pFrontSideL = { x: length * 0.6, y: -width/2.5 };
+            const pFrontSideR = { x: length * 0.6, y: width/2.5 };
+            const pBackSideL = { x: -length * 0.8, y: -width/2 };
+            const pBackSideR = { x: -length * 0.8, y: width/2 };
+            
+            const rotatePoint = (p) => ({
+                x: p.x * Math.cos(angle) - p.y * Math.sin(angle),
+                y: p.x * Math.sin(angle) + p.y * Math.cos(angle)
+            });
+
+            const rpFront = rotatePoint(pFront);
+            const rpFrontSideL = rotatePoint(pFrontSideL);
+            const rpFrontSideR = rotatePoint(pFrontSideR);
+            const rpBackSideL = rotatePoint(pBackSideL);
+            const rpBackSideR = rotatePoint(pBackSideR);
+            
+            ctx.moveTo(x + rpBackSideL.x, y + rpBackSideL.y);
+            ctx.lineTo(x + rpFrontSideL.x, y + rpFrontSideL.y);
+            ctx.quadraticCurveTo(x + rpFront.x, y + rpFront.y, x + rpFrontSideR.x, y + rpFrontSideR.y);
+            ctx.lineTo(x + rpBackSideR.x, y + rpBackSideR.y);
+            ctx.closePath();
+            
+            ctx.fillStyle = '#000';
+            ctx.fill();
+            ctx.stroke();
+            
+            const rotatedPincerOrigin = rotatePoint({ x: length, y: 0 });
+            drawPincers(x + rotatedPincerOrigin.x, y + rotatedPincerOrigin.y, angle, 1.2);
+            
+            ctx.restore();
+        }
+
+        function drawPincers(x, y, angle, scale) {
+            ctx.save();
+            ctx.lineWidth = 0.8;
+            for (let i = -1; i <= 1; i += 2) {
+                const idleWiggle = state.headSpeed < 0.2 ? Math.sin(animationFrame * 0.1 + i * 2) * 0.15 : 0;
+                
+                const ang1 = angle + i * 0.7 + idleWiggle;
+                const j1x = x + 6 * scale * Math.cos(ang1);
+                const j1y = y + 6 * scale * Math.sin(ang1);
+                
+                const ang2 = angle + i * 1.1 + idleWiggle * 1.5;
+                const j2x = j1x + 4 * scale * Math.cos(ang2);
+                const j2y = j1y + 4 * scale * Math.sin(ang2);
+                
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(j1x, j1y);
+                ctx.lineTo(j2x, j2y);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // *** FUNCIÓN DE DIBUJO DEL AGUIJÓN MEJORADA ***
+        function drawStinger(x, y, angle) {
+            ctx.save();
+            
+            let strikeAngleOffset = 0;
+            if (state.isStriking) {
+                const strikePhase = state.strikeProgress / config.strike.duration;
+                strikeAngleOffset = Math.sin(strikePhase * Math.PI) * config.strike.angleOffset;
+            }
+            const finalAngle = angle + strikeAngleOffset;
+
+            // Trazar un bulbo (telson) y un aguijón (aculeus) más realistas
+            const bulbSize = 7;
+            const barbLength = 15;
+            const barbAngleOffset = 0.4;
+
+            // Puntos de control para la forma del bulbo
+            const p1 = { x: x, y: y };
+            const p2 = {
+                x: x + bulbSize * Math.cos(finalAngle - Math.PI / 2),
+                y: y + bulbSize * Math.sin(finalAngle - Math.PI / 2)
+            };
+            const p3 = {
+                x: x + barbLength * Math.cos(finalAngle + barbAngleOffset),
+                y: y + barbLength * Math.sin(finalAngle + barbAngleOffset)
+            };
+            const p4 = {
+                x: x + bulbSize * Math.cos(finalAngle + Math.PI / 2),
+                y: y + bulbSize * Math.sin(finalAngle + Math.PI / 2)
+            };
+
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.quadraticCurveTo(p2.x, p2.y, p3.x, p3.y);
+            ctx.quadraticCurveTo(p4.x, p4.y, p1.x, p1.y);
+            
+            ctx.fillStyle = ctx.strokeStyle;
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.restore();
+        }
+
+        function drawScorpion() {
+            const bodyColor = `hsl(${state.currentHue}, ${config.color.saturation}%, ${config.color.lightness}%)`;
+            const glowColor = `hsl(${state.currentHue}, ${config.color.saturation}%, ${config.color.glowLightness}%)`;
+
+            ctx.strokeStyle = bodyColor;
+            ctx.lineWidth = 1.2;
+            ctx.shadowColor = glowColor;
+            ctx.shadowBlur = config.color.glowBlur;
+
+            const bodyVertebraeCount = 20;
+
+            state.legs.forEach(leg => {
+                const bodyPoint = state.spinePoints[leg.spineIndex];
+                drawLegIK(bodyPoint, leg);
+            });
+
+            for (let i = 0; i < state.spinePoints.length - 1; i++) {
+                const p1 = state.spinePoints[i];
+                const p2 = state.spinePoints[i+1];
+                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                
+                const t = i / state.spinePoints.length;
+                const size = (3.0 - Math.pow(t, 0.6) * 4.0) * 1.2;
+
+                if (i === 0) {
+                    drawHead(p1.x, p1.y, angle, config.head.size);
+                } else if (size > 0.2) {
+                    drawVertebra(p1.x, p1.y, angle, size, i < bodyVertebraeCount);
+                } else {
+                    ctx.beginPath();
+                    ctx.moveTo(p1.x, p1.y);
+                    ctx.lineTo(p2.x, p2.y);
+                    ctx.stroke();
+                }
+                
+                if (i === state.spinePoints.length - 2) {
+                    drawStinger(p2.x, p2.y, angle);
+                }
+            }
+        }
+
+        // --- Sistema de Partículas ---
+
+        function createParticleExplosion(x, y) {
+            for (let i = 0; i < config.particles.count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = config.particles.minSpeed + Math.random() * (config.particles.maxSpeed - config.particles.minSpeed);
+                state.particles.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    life: config.particles.minLife + Math.random() * (config.particles.maxLife - config.particles.minLife),
+                    maxLife: config.particles.maxLife,
+                });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = state.particles.length - 1; i >= 0; i--) {
+                const p = state.particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.08; 
+                p.life--;
+
+                if (p.life <= 0) {
+                    state.particles.splice(i, 1);
+                }
+            }
+        }
+
+        function drawParticles(ctx) {
+            state.particles.forEach(p => {
+                const particleHue = (state.currentHue + 180) % 360; 
+                const alpha = p.life / p.maxLife;
+                ctx.fillStyle = `hsla(${particleHue}, ${config.color.saturation}%, ${config.color.glowLightness}%, ${alpha * 0.9})`;
+                ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+            });
+        }
+        
+        // --- Lógica de Actualización ---
+
+        function updateLegs() {
+            let steppingLegsInGroup = { 0: 0, 1: 0 };
+            state.legs.forEach(leg => {
+                if (leg.isStepping) {
+                    steppingLegsInGroup[leg.gaitGroup]++;
+                }
+            });
+
+            state.legs.forEach((leg) => {
+                const bodyPoint = state.spinePoints[leg.spineIndex];
+                const bodyAngle = Math.atan2(state.spinePoints[leg.spineIndex + 1].y - bodyPoint.y, state.spinePoints[leg.spineIndex + 1].x - bodyPoint.x);
+                const naturalPos = getLegNaturalRestingPos(bodyPoint, bodyAngle, leg.side, 1.0);
+                const distFromNatural = Math.hypot(leg.footPos.x - naturalPos.x, leg.footPos.y - naturalPos.y);
+
+                if (leg.isStepping) {
+                    leg.stepProgress++;
+                    
+                    let t = leg.stepProgress / leg.currentStepDuration;
+                    t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+                    leg.footPos.x = leg.stepStartPos.x + (leg.stepTargetPos.x - leg.stepStartPos.x) * t;
+                    leg.footPos.y = leg.stepStartPos.y + (leg.stepTargetPos.y - leg.stepStartPos.y) * t;
+
+                    if (leg.stepProgress >= leg.currentStepDuration) {
+                        leg.isStepping = false;
+                    }
+                } else {
+                    const canStep = steppingLegsInGroup[leg.gaitGroup] === 0;
+                    
+                    if (distFromNatural > config.legs.stepThreshold && canStep && !state.isGrabbed) {
+                        leg.isStepping = true;
+                        leg.stepProgress = 0;
+                        Object.assign(leg.stepStartPos, leg.footPos);
+                        leg.currentStepDuration = config.legs.stepDuration;
+
+                        leg.stepTargetPos = getLegNaturalRestingPos(bodyPoint, bodyAngle, leg.side, 1.0);
+                    }
+                }
+            });
+        }
+
+        function updateStrike() {
+            if (state.isStriking) {
+                if (state.strikeProgress === Math.floor(config.strike.duration / 2)) {
+                    const tailSegmentIndex = state.spinePoints.length - 2;
+                    const p1 = state.spinePoints[tailSegmentIndex];
+                    const p2 = state.spinePoints[tailSegmentIndex + 1];
+                    const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                    
+                    const strikePhase = state.strikeProgress / config.strike.duration;
+                    const strikeAngleOffset = Math.sin(strikePhase * Math.PI) * config.strike.angleOffset;
+                    const endX = p2.x + config.tail.stingerLength * Math.cos(angle + 0.2 + strikeAngleOffset);
+                    const endY = p2.y + config.tail.stingerLength * Math.sin(angle + 0.2 + strikeAngleOffset);
+                    
+                    createParticleExplosion(endX, endY);
+                }
+
+                state.strikeProgress++;
+                if (state.strikeProgress >= config.strike.duration) {
+                    state.isStriking = false;
+                    state.strikeProgress = 0;
+                }
+            }
+        }
+
+
+        function animate() {
+            animationFrame++;
+            state.currentHue = (state.currentHue + config.color.hueChangeSpeed) % 360;
+
+            const width = canvas.width / dpr;
+            const height = canvas.height / dpr;
+            
+            const head = state.spinePoints[0];
+            const oldHeadX = head.x;
+            const oldHeadY = head.y;
+
+            if (state.isGrabbed && state.grabbedPointIndex !== -1) {
+                // Si está agarrado, el punto del cuerpo sigue al ratón
+                const grabbedPoint = state.spinePoints[state.grabbedPointIndex];
+                grabbedPoint.x = state.mouse.x;
+                grabbedPoint.y = state.mouse.y;
+            } else {
+                // Si no, la cabeza intenta seguir al ratón lentamente
+                state.targetPos.x = state.mouse.x;
+                state.targetPos.y = state.mouse.y;
+
+                const distToTarget = Math.hypot(state.targetPos.x - head.x, state.targetPos.y - head.y);
+
+                if (distToTarget > 2) {
+                    let moveX, moveY;
+                    let currentSpeed = config.movement.walkSpeed;
+
+                    const angleToTarget = Math.atan2(state.targetPos.y - head.y, state.targetPos.x - head.x);
+                    moveX = currentSpeed * Math.cos(angleToTarget);
+                    moveY = currentSpeed * Math.sin(angleToTarget);
+
+                    if (distToTarget < config.movement.slowdownRadius) {
+                        const slowdownFactor = distToTarget / config.movement.slowdownRadius;
+                        moveX *= slowdownFactor;
+                        moveY *= slowdownFactor;
+                    }
+
+                    const moveDist = Math.hypot(moveX, moveY);
+                    if (moveDist > config.maxSpeed) {
+                        const ratio = config.maxSpeed / moveDist;
+                        moveX *= ratio;
+                        moveY *= ratio;
+                    }
+
+                    head.x += moveX;
+                    head.y += moveY;
+                }
+            }
+            
+            state.headSpeed = Math.hypot(head.x - oldHeadX, head.y - oldHeadY);
+            
+            const headAngle = Math.atan2(state.spinePoints[1].y - head.y, state.spinePoints[1].x - head.x);
+            const angleDifference = (headAngle - state.lastHeadAngle + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+            state.lastHeadAngle = headAngle;
+
+            // --- Actualizar física de la columna (con inercia y balanceo) ---
+            for (let i = 1; i < state.spinePoints.length; i++) {
+                const currentPoint = state.spinePoints[i];
+                const prevPoint = state.spinePoints[i - 1];
+
+                // Arrastre (inercia)
+                const targetX = prevPoint.x + Math.cos(headAngle) * config.segmentLength;
+                const targetY = prevPoint.y + Math.sin(headAngle) * config.segmentLength;
+                currentPoint.x = currentPoint.x * config.movement.spineDrag + targetX * (1 - config.movement.spineDrag);
+                currentPoint.y = currentPoint.y * config.movement.spineDrag + targetY * (1 - config.movement.spineDrag);
+
+                // Balanceo al girar y movimiento en reposo
+                const t = i / state.spinePoints.length;
+                const sway = Math.sin(t * Math.PI) * angleDifference * config.movement.turnSway * i;
+                const idleWiggle = state.headSpeed < 0.2 ?
+                    Math.sin(animationFrame * config.tail.idleWiggleSpeed + i * 0.3) * config.tail.idleWiggleAmount * (1 - t) :
+                    0;
+
+                const wiggleAngle = headAngle + Math.PI / 2;
+                currentPoint.x += Math.cos(wiggleAngle) * (sway + idleWiggle);
+                currentPoint.y += Math.sin(wiggleAngle) * (sway + idleWiggle);
+
+                // *** NUEVA LÓGICA PARA LA CURVA DE LA COLA ***
+                if (i > config.tail.curlStartSegment) {
+                    const tailProgress = (i - config.tail.curlStartSegment) / (state.spinePoints.length - config.tail.curlStartSegment);
+                    const curlHeight = Math.sin(tailProgress * Math.PI) * config.tail.curl;
+                    
+                    // Aplicar la fuerza de curvatura "hacia arriba" con respecto a la dirección del escorpión
+                    const curlAngle = headAngle - Math.PI / 2; 
+                    currentPoint.x += Math.cos(curlAngle) * curlHeight;
+                    currentPoint.y += Math.sin(curlAngle) * curlHeight;
+                }
+            }
+
+            for (let j = 0; j < config.physicsIterations; j++) {
+                // Anclar el punto agarrado si lo hay
+                if (state.isGrabbed && state.grabbedPointIndex !== -1) {
+                    const grabbedPoint = state.spinePoints[state.grabbedPointIndex];
+                    grabbedPoint.x = state.mouse.x;
+                    grabbedPoint.y = state.mouse.y;
+                }
+                for (let i = 1; i < state.spinePoints.length; i++) {
+                    const currentPoint = state.spinePoints[i];
+                    const prevPoint = state.spinePoints[i-1];
+
+                    const dx = currentPoint.x - prevPoint.x;
+                    const dy = currentPoint.y - prevPoint.y;
+                    const distance = Math.hypot(dx, dy);
+                    
+                    if (distance > 0.01) {
+                        const difference = config.segmentLength - distance;
+                        const percent = difference / distance;
+                        const offsetX = dx * percent;
+                        const offsetY = dy * percent;
+
+                        currentPoint.x += offsetX;
+                        currentPoint.y += offsetY;
+                    }
+                }
+            }
+
+            updateStrike();
+            updateParticles();
+            updateLegs();
+
+            ctx.clearRect(0, 0, width, height);
+            drawScorpion();
+            drawParticles(ctx);
+            requestAnimationFrame(animate);
+        }
+
+        // --- Event Listeners ---
+        function updateMousePosition(e) {
+            const rect = canvas.getBoundingClientRect();
+            let clientX, clientY;
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+            state.mouse.x = (clientX - rect.left);
+            state.mouse.y = (clientY - rect.top);
+        }
+
+        canvas.addEventListener('mousemove', updateMousePosition);
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            updateMousePosition(e);
+        });
+
+        canvas.addEventListener('click', (e) => {
+            // Se previene el ataque si el escorpión fue arrastrado recientemente,
+            // para no atacar accidentalmente al soltarlo.
+            if (!state.isStriking && !state.isGrabbed) {
+                state.isStriking = true;
+                state.strikeProgress = 0;
+                state.strikeTarget.x = state.mouse.x;
+                state.strikeTarget.y = state.mouse.y;
+            }
+        });
+        
+        canvas.addEventListener('mousedown', (e) => {
+            if (!state.isGrabbed) {
+                for (let i = 0; i < state.spinePoints.length; i++) {
+                    const p = state.spinePoints[i];
+                    const dist = Math.hypot(state.mouse.x - p.x, state.mouse.y - p.y);
+                    if (dist < config.movement.grabRadius) {
+                        state.isGrabbed = true;
+                        state.grabbedPointIndex = i;
+                        canvas.style.cursor = 'grabbing';
+                        break;
+                    }
+                }
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (state.isGrabbed) {
+                state.isGrabbed = false;
+                state.grabbedPointIndex = -1;
+                canvas.style.cursor = 'pointer';
+            }
+        });
+        
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            updateMousePosition(e);
+            if (!state.isGrabbed) {
+                for (let i = 0; i < state.spinePoints.length; i++) {
+                    const p = state.spinePoints[i];
+                    const dist = Math.hypot(state.mouse.x - p.x, state.mouse.y - p.y);
+                    if (dist < config.movement.grabRadius) {
+                        state.isGrabbed = true;
+                        state.grabbedPointIndex = i;
+                        break;
+                    }
+                }
+            }
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (state.isGrabbed) {
+                state.isGrabbed = false;
+                state.grabbedPointIndex = -1;
+            }
+        });
+
+
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- Inicio ---
+        resizeCanvas();
+        animate();
+    </script></body>
+</html>
+
