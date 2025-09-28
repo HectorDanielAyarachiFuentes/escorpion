@@ -1,0 +1,45 @@
+/*
+  Reseteo y configuración base para asegurar que la página ocupe toda la ventana
+  sin márgenes ni barras de scroll.
+*/
+html, body {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+/*
+  Estilos específicos para el body: fondo, tipografía y cursor.
+*/
+body {
+    background: #000000;
+    font-family: 'Inter', sans-serif, system-ui;
+    cursor: pointer;
+    color: white;
+}
+
+/*
+  Estilos para el elemento canvas.
+*/
+canvas {
+    background-color: transparent;
+    /* Hacemos que el canvas ocupe toda la pantalla y se superponga */
+    position: absolute;
+    top: 0;
+    left: 0;
+}
+
+/*
+  Estilos para el texto de instrucciones.
+*/
+#instructions {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    pointer-events: none; /* Asegura que el texto no interfiera con los eventos del canvas */
+}
