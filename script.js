@@ -3,7 +3,7 @@ const ctx = canvas.getContext('2d');
 
 // --- Configuración ---
 const config = {
-    numSpinePoints: 70,
+    numSpinePoints: 80,
     segmentLength: 4.0,
     maxSpeed: 5.5,
     physicsIterations: 5,
@@ -49,7 +49,7 @@ const config = {
         stingerLength: 22,
         idleWiggleSpeed: 0.05,
         idleWiggleAmount: 0.15,
-        curl: 4.0, // Factor de altura de la curva de la cola (AUMENTADO)
+        curl: 5.0, // Factor de altura de la curva de la cola (AUMENTADO)
         curlStartSegment: 15, // Segmento donde empieza a curvarse (REDUCIDO)
         // --- Nuevos parámetros para movimiento orgánico ---
         speedCurlFactor: 1.5, // Cuánto se estira la cola al moverse rápido
@@ -1186,29 +1186,42 @@ class Scorpion {
         const finalAngle = angle + strikeAngleOffset;
         
         // --- NUEVA LÓGICA PARA FORMA DE AGUIJÓN AMENAZANTE ---
-        const bulbRadius = 8;
-        const stingerLength = 22;
-        const stingerCurve = 0.8; // Curvatura de la púa
+        const bulbRadius = 9;
+        const stingerLength = 28; // Más largo
+        const stingerCurve = 0.9; // Más curvado
 
-        // Centro del bulbo, ligeramente desplazado hacia atrás desde la punta de la cola
-        const bulbCenterX = baseX - 3 * Math.cos(finalAngle);
-        const bulbCenterY = baseY - 3 * Math.sin(finalAngle);
-
-        // Punta de la púa
-        const tipX = bulbCenterX + stingerLength * Math.cos(finalAngle + stingerCurve);
-        const tipY = bulbCenterY + stingerLength * Math.sin(finalAngle + stingerCurve);
-
-        // Punto de control para la curva de la púa
-        const controlX = bulbCenterX + stingerLength * 0.5 * Math.cos(finalAngle + stingerCurve * 0.5);
-        const controlY = bulbCenterY + stingerLength * 0.5 * Math.sin(finalAngle + stingerCurve * 0.5);
-
+        // Bulbo
+        const bulbCenterX = baseX - 4 * Math.cos(finalAngle);
+        const bulbCenterY = baseY - 4 * Math.sin(finalAngle);
         this.ctx.beginPath();
-        this.ctx.arc(bulbCenterX, bulbCenterY, bulbRadius, finalAngle - Math.PI / 2, finalAngle + Math.PI / 2);
-        this.ctx.quadraticCurveTo(controlX, controlY, tipX, tipY);
+        this.ctx.arc(bulbCenterX, bulbCenterY, bulbRadius, finalAngle - Math.PI / 2.2, finalAngle + Math.PI / 2.2);
         this.ctx.closePath();
-        
         this.ctx.fillStyle = this.ctx.strokeStyle;
         this.ctx.fill();
+        this.ctx.stroke();
+
+        // Púa principal
+        const tipX = bulbCenterX + stingerLength * Math.cos(finalAngle + stingerCurve);
+        const tipY = bulbCenterY + stingerLength * Math.sin(finalAngle + stingerCurve);
+        const controlX = bulbCenterX + stingerLength * 0.5 * Math.cos(finalAngle + stingerCurve * 0.5);
+        const controlY = bulbCenterY + stingerLength * 0.5 * Math.sin(finalAngle + stingerCurve * 0.5);
+        const baseOffsetX = bulbRadius * 0.6 * Math.cos(finalAngle + Math.PI / 2);
+        const baseOffsetY = bulbRadius * 0.6 * Math.sin(finalAngle + Math.PI / 2);
+        this.ctx.beginPath();
+        this.ctx.moveTo(bulbCenterX + baseOffsetX, bulbCenterY + baseOffsetY);
+        this.ctx.quadraticCurveTo(controlX, controlY, tipX, tipY);
+        this.ctx.lineTo(bulbCenterX - baseOffsetX, bulbCenterY - baseOffsetY);
+        this.ctx.stroke();
+
+        // Púa secundaria (detalle)
+        const subStingerLength = 10;
+        const subStingerAngle = finalAngle - 0.5;
+        const subTipX = bulbCenterX + subStingerLength * Math.cos(subStingerAngle);
+        const subTipY = bulbCenterY + subStingerLength * Math.sin(subStingerAngle);
+        this.ctx.beginPath();
+        this.ctx.moveTo(bulbCenterX, bulbCenterY);
+        this.ctx.lineTo(subTipX, subTipY);
+        this.ctx.lineWidth = 2;
         this.ctx.stroke();
 
         this.ctx.restore();
