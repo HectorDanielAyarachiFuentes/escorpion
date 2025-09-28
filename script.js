@@ -1228,43 +1228,35 @@ class Scorpion {
         }
         const finalAngle = angle + strikeAngleOffset;
         
-        // --- LÓGICA DE AGUIJÓN REDISEÑADA: MÁS AFILADO Y DETALLADO ---
-        const bulbRadius = 10;
-        const stingerLength = 35; // Aún más largo para un aspecto afilado
-        const stingerCurve = 1.1; // Curva más pronunciada
+        // --- LÓGICA DE AGUIJÓN RESTAURADA A LA VERSIÓN ANTERIOR ---
+        const bulbRadius = 9;
+        const stingerLength = 28; // Más largo
+        const stingerCurve = 0.9; // Más curvado
 
-        // El centro del bulbo se desplaza ligeramente para una mejor conexión visual
+        // Bulbo
         const bulbCenterX = baseX - 4 * Math.cos(finalAngle);
         const bulbCenterY = baseY - 4 * Math.sin(finalAngle);
-
-        // Dibujar el bulbo con una forma más orgánica usando curvas de Bézier
-        const bulbAngle1 = finalAngle - Math.PI / 1.8;
-        const bulbAngle2 = finalAngle + Math.PI / 1.8;
-        const p1 = { x: bulbCenterX + bulbRadius * Math.cos(bulbAngle1), y: bulbCenterY + bulbRadius * Math.sin(bulbAngle1) };
-        const p2 = { x: bulbCenterX + bulbRadius * Math.cos(bulbAngle2), y: bulbCenterY + bulbRadius * Math.sin(bulbAngle2) };
-        const controlDist = bulbRadius * 1.2;
-        const controlPoint = { x: bulbCenterX + controlDist * Math.cos(finalAngle - Math.PI), y: bulbCenterY + controlDist * Math.sin(finalAngle - Math.PI) };
-        
         this.ctx.beginPath();
-        this.ctx.moveTo(p1.x, p1.y);
-        this.ctx.quadraticCurveTo(controlPoint.x, controlPoint.y, p2.x, p2.y);
+        this.ctx.arc(bulbCenterX, bulbCenterY, bulbRadius, finalAngle - Math.PI / 2.2, finalAngle + Math.PI / 2.2);
         this.ctx.closePath();
         this.ctx.fillStyle = this.ctx.strokeStyle;
         this.ctx.fill();
         this.ctx.stroke();
 
-        // Púa principal: más larga y delgada
+        // Púa principal
         const tipX = bulbCenterX + stingerLength * Math.cos(finalAngle + stingerCurve);
         const tipY = bulbCenterY + stingerLength * Math.sin(finalAngle + stingerCurve);
-        const controlX = bulbCenterX + stingerLength * 0.5 * Math.cos(finalAngle + stingerCurve * 0.6);
-        const controlY = bulbCenterY + stingerLength * 0.5 * Math.sin(finalAngle + stingerCurve * 0.6);
+        const controlX = bulbCenterX + stingerLength * 0.5 * Math.cos(finalAngle + stingerCurve * 0.5);
+        const controlY = bulbCenterY + stingerLength * 0.5 * Math.sin(finalAngle + stingerCurve * 0.5);
+        const baseOffsetX = bulbRadius * 0.6 * Math.cos(finalAngle + Math.PI / 2);
+        const baseOffsetY = bulbRadius * 0.6 * Math.sin(finalAngle + Math.PI / 2);
         this.ctx.beginPath();
-        this.ctx.moveTo(p1.x, p1.y);
+        this.ctx.moveTo(bulbCenterX + baseOffsetX, bulbCenterY + baseOffsetY);
         this.ctx.quadraticCurveTo(controlX, controlY, tipX, tipY);
-        this.ctx.lineTo(p2.x, p2.y);
+        this.ctx.lineTo(bulbCenterX - baseOffsetX, bulbCenterY - baseOffsetY);
         this.ctx.stroke();
 
-        // Púa secundaria (detalle sutil)
+        // Púa secundaria (detalle)
         const subStingerLength = 10;
         const subStingerAngle = finalAngle - 0.5;
         const subTipX = bulbCenterX + subStingerLength * Math.cos(subStingerAngle);
@@ -1274,7 +1266,6 @@ class Scorpion {
         this.ctx.lineTo(subTipX, subTipY);
         this.ctx.lineWidth = 2;
         this.ctx.stroke();
-        this.ctx.restore();
     }
     // --- FIN DE LA LÓGICA DEL AGUIJÓN ---
 }
