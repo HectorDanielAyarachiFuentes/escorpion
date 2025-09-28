@@ -650,59 +650,56 @@ class Scorpion {
             leg.draw(this.ctx, bodyPoint);
         });
 
-        for (let i = 0; i < this.spinePoints.length - 1; i++) {
-            const p1 = this.spinePoints[i];
-            const p2 = this.spinePoints[i+1];
-            const t = i / this.spinePoints.length;
-            const size = (3.0 - Math.pow(t, 0.6) * 4.0) * 1.2;
+        // --- NUEVA LÓGICA PARA DIBUJAR CUERPO SEGMENTADO ---
+        this.ctx.fillStyle = '#000';
+        // Modificado para recorrer toda la cola, hasta el penúltimo segmento.
+        const bodyEndIndex = this.spinePoints.length - 2;
 
-            if (i === 0) {
-                this._drawHead(p1.x, p1.y, this.headAngle, this.config.head.size);
-                this._drawPincers(p1.x, p1.y, this.headAngle);
-            } else if (size > 0.2) {
-                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-                this._drawVertebra(p1.x, p1.y, angle, size, i < 20);
-            } else {
-                this.ctx.beginPath();
-                this.ctx.moveTo(p1.x, p1.y);
-                this.ctx.lineTo(p2.x, p2.y);
-                this.ctx.stroke();
-            }
+        // Dibujar desde la cola hacia la cabeza para que las placas se superpongan correctamente
+        for (let i = bodyEndIndex; i > 1; i--) {
+            const p1 = this.spinePoints[i];
+            const p2 = this.spinePoints[i - 1];
+            const t = i / this.spinePoints.length;
             
-            if (i === this.spinePoints.length - 2) {
-                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-                this._drawStinger(p2.x, p2.y, angle);
-            }
+            // Fórmula de ancho modificada para asegurar que la cola tenga un grosor mínimo.
+            const width1 = Math.max(0.8, (3.0 - Math.pow(t, 0.6) * 4.0) * 2.8);
+            const width2 = Math.max(0.8, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 2.8);
+
+            if (width1 < 0.5) continue;
+
+            const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x) + Math.PI / 2;
+            const angle2 = Math.atan2(p1.y - this.spinePoints[i-2].y, p1.x - this.spinePoints[i-2].x) + Math.PI / 2;
+
+            // Vértices de la placa (un cuadrilátero)
+            const p1_left = { x: p1.x + width1 * Math.cos(angle1), y: p1.y + width1 * Math.sin(angle1) };
+            const p1_right = { x: p1.x - width1 * Math.cos(angle1), y: p1.y - width1 * Math.sin(angle1) };
+            const p2_left = { x: p2.x + width2 * Math.cos(angle2), y: p2.y + width2 * Math.sin(angle2) };
+            const p2_right = { x: p2.x - width2 * Math.cos(angle2), y: p2.y - width2 * Math.sin(angle2) };
+
+            this.ctx.beginPath();
+            this.ctx.moveTo(p1_left.x, p1_left.y);
+            this.ctx.lineTo(p2_left.x, p2_left.y);
+            this.ctx.lineTo(p2_right.x, p2_right.y);
+            this.ctx.lineTo(p1_right.x, p1_right.y);
+            this.ctx.closePath();
+
+            this.ctx.fill();
+            this.ctx.stroke();
         }
+        // --- FIN DE LA LÓGICA DEL CUERPO SEGMENTADO ---
+
+        // Dibujar cabeza, pinzas y aguijón encima del cuerpo
+        this._drawHead(this.spinePoints[0].x, this.spinePoints[0].y, this.headAngle, this.config.head.size);
+        this._drawPincers(this.spinePoints[0].x, this.spinePoints[0].y, this.headAngle);
+        const tailTip = this.spinePoints[this.spinePoints.length - 1];
+        const preTip = this.spinePoints[this.spinePoints.length - 2];
+        this._drawStinger(tailTip.x, tailTip.y, Math.atan2(tailTip.y - preTip.y, tailTip.x - preTip.x));
     }
 
     _drawParticles() {
         this.ctx.save();
         this.particles.forEach(p => p.draw(this.ctx));
         this.ctx.restore();
-    }
-
-    _drawVertebra(x, y, angle, size, hasRibs) {
-        this.ctx.beginPath();
-        this.ctx.arc(x, y, size * 0.7, 0, Math.PI * 2);
-        this.ctx.fillStyle = '#000';
-        this.ctx.fill();
-        this.ctx.stroke();
-
-        if (hasRibs) {
-            const ribLength = size * 4.2;
-            const p1x = x + ribLength * Math.cos(angle - Math.PI / 2);
-            const p1y = y + ribLength * Math.sin(angle - Math.PI / 2);
-            const p2x = x + ribLength * Math.cos(angle + Math.PI / 2);
-            const p2y = y + ribLength * Math.sin(angle + Math.PI / 2);
-
-            this.ctx.beginPath();
-            this.ctx.moveTo(x, y);
-            this.ctx.lineTo(p1x, p1y);
-            this.ctx.moveTo(x, y);
-            this.ctx.lineTo(p2x, p2y);
-            this.ctx.stroke();
-        }
     }
 
     _drawHead(x, y, angle, size) {
