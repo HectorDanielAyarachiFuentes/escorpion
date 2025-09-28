@@ -65,7 +65,7 @@
             numSpinePoints: 70,
             segmentLength: 4.0,
             maxSpeed: 5.5,
-            physicsIterations: 10,
+            physicsIterations: 5,
             // --- Nuevas configuraciones centralizadas ---
             head: {
                 size: 5.5,
@@ -82,8 +82,8 @@
                 stepThreshold: 35, // Pasos más largos y deliberados
                 stepDuration: 18,  // Pasos más rápidos y firmes
                 stepLift: 15,
-                stepPrediction: 8,
-                maxStepPredictionDistance: 60,
+                stepPredictionFrames: 12,      // Cuántos frames hacia el futuro predecir el paso.
+                maxPredictionDistance: 50, // Límite a la distancia de predicción para evitar pasos erráticos.
             },
             movement: {
                 walkSpeed: 1.2, // Ligeramente más lento para que coincida con los pasos
@@ -102,14 +102,26 @@
                 idleWiggleAmount: 0.15,
                 curl: 2.5, // Factor de altura de la curva de la cola
                 curlStartSegment: 20, // Segmento donde empieza a curvarse
+                // --- Nuevos parámetros para movimiento orgánico ---
+                speedCurlFactor: 1.5, // Cuánto se estira la cola al moverse rápido
+                undulationAmount: 2.0, // Amplitud de la ondulación del cuerpo
+                undulationSpeed: 0.2,  // Velocidad de la ondulación del cuerpo
+            },
+            pincers: {
+                angle: 1.2,
+                length1: 15,
+                length2: 20,
+                width: 8,
             },
             // --- Configuración de partículas ---
             particles: {
-                count: 20,
-                minLife: 15,
-                maxLife: 30,
-                minSpeed: 2,
-                maxSpeed: 5,
+                count: 40,          // Más partículas para un rocío más denso
+                minLife: 25,
+                maxLife: 50,
+                minSpeed: 3,
+                maxSpeed: 7,
+                sprayAngle: 0.8,    // Ángulo del cono del rocío (en radianes)
+                drag: 0.96,         // Resistencia del aire para que se frene
             },
             // --- Configuración de color dinámico ---
             color: {
@@ -135,6 +147,8 @@
             isStriking: false,
             strikeProgress: 0,
             strikeTarget: { x: 0, y: 0 },
+            headVelocity: { x: 0, y: 0 }, // Guardar la velocidad de la cabeza para la predicción de las patas
+            headAngularVelocity: 0, // Guardar la velocidad de giro para la predicción
             lastHeadAngle: 0, 
             currentHue: 0, 
             particles: [],
@@ -331,31 +345,49 @@
             ctx.fill();
             ctx.stroke();
             
-            const rotatedPincerOrigin = rotatePoint({ x: length, y: 0 });
-            drawPincers(x + rotatedPincerOrigin.x, y + rotatedPincerOrigin.y, angle, 1.2);
-            
             ctx.restore();
         }
 
         function drawPincers(x, y, angle, scale) {
             ctx.save();
-            ctx.lineWidth = 0.8;
-            for (let i = -1; i <= 1; i += 2) {
-                const idleWiggle = state.headSpeed < 0.2 ? Math.sin(animationFrame * 0.1 + i * 2) * 0.15 : 0;
-                
-                const ang1 = angle + i * 0.7 + idleWiggle;
-                const j1x = x + 6 * scale * Math.cos(ang1);
-                const j1y = y + 6 * scale * Math.sin(ang1);
-                
-                const ang2 = angle + i * 1.1 + idleWiggle * 1.5;
-                const j2x = j1x + 4 * scale * Math.cos(ang2);
-                const j2y = j1y + 4 * scale * Math.sin(ang2);
-                
+            ctx.lineWidth = 1.2;
+
+            for (let side = -1; side <= 1; side += 2) {
+                const pincerAngle = angle + side * config.pincers.angle;
+                const idleWiggle = state.headSpeed < 0.2 ? Math.sin(animationFrame * 0.1 + side * 2) * 0.1 : 0;
+
+                // Primer segmento de la tenaza
+                const seg1Angle = pincerAngle + idleWiggle;
+                const seg1X = x + config.pincers.length1 * Math.cos(seg1Angle) * scale;
+                const seg1Y = y + config.pincers.length1 * Math.sin(seg1Angle) * scale;
+
+                // Segundo segmento (la pinza)
+                const seg2Angle = seg1Angle + side * 0.5 + idleWiggle * 1.5;
+                const seg2X = seg1X + config.pincers.length2 * Math.cos(seg2Angle) * scale;
+                const seg2Y = seg1Y + config.pincers.length2 * Math.sin(seg2Angle) * scale;
+
+                // Dibuja la parte fija de la pinza
                 ctx.beginPath();
                 ctx.moveTo(x, y);
-                ctx.lineTo(j1x, j1y);
-                ctx.lineTo(j2x, j2y);
+                ctx.lineTo(seg1X, seg1Y);
+                ctx.lineTo(seg2X, seg2Y);
                 ctx.stroke();
+
+                // Dibuja la parte móvil de la pinza
+                const seg3Angle = seg1Angle - side * 0.4 + idleWiggle * 1.2;
+                const seg3X = seg1X + config.pincers.length2 * 0.8 * Math.cos(seg3Angle) * scale;
+                const seg3Y = seg1Y + config.pincers.length2 * 0.8 * Math.sin(seg3Angle) * scale;
+                
+                ctx.beginPath();
+                ctx.moveTo(seg1X, seg1Y);
+                ctx.lineTo(seg3X, seg3Y);
+                ctx.stroke();
+
+                // Dibuja las articulaciones
+                ctx.beginPath();
+                ctx.arc(seg1X, seg1Y, 2 * scale, 0, Math.PI * 2);
+                ctx.fillStyle = ctx.strokeStyle;
+                ctx.fill();
             }
             ctx.restore();
         }
@@ -414,6 +446,8 @@
 
             const bodyVertebraeCount = 20;
 
+            drawPincers(state.spinePoints[0].x, state.spinePoints[0].y, state.lastHeadAngle, 1);
+
             state.legs.forEach(leg => {
                 const bodyPoint = state.spinePoints[leg.spineIndex];
                 drawLegIK(bodyPoint, leg);
@@ -446,17 +480,20 @@
 
         // --- Sistema de Partículas ---
 
-        function createParticleExplosion(x, y) {
+        function createParticleExplosion(x, y, angle) {
             for (let i = 0; i < config.particles.count; i++) {
-                const angle = Math.random() * Math.PI * 2;
+                const sprayAngle = angle + (Math.random() - 0.5) * config.particles.sprayAngle;
                 const speed = config.particles.minSpeed + Math.random() * (config.particles.maxSpeed - config.particles.minSpeed);
                 state.particles.push({
                     x: x,
                     y: y,
-                    vx: Math.cos(angle) * speed,
-                    vy: Math.sin(angle) * speed,
+                    prevX: x, // Guardar posición anterior para la estela
+                    prevY: y,
+                    vx: Math.cos(sprayAngle) * speed,
+                    vy: Math.sin(sprayAngle) * speed,
                     life: config.particles.minLife + Math.random() * (config.particles.maxLife - config.particles.minLife),
                     maxLife: config.particles.maxLife,
+                    size: 1 + Math.random() * 2.5, // Tamaño variable para las gotas
                 });
             }
         }
@@ -464,9 +501,13 @@
         function updateParticles() {
             for (let i = state.particles.length - 1; i >= 0; i--) {
                 const p = state.particles[i];
+                p.prevX = p.x;
+                p.prevY = p.y;
                 p.x += p.vx;
                 p.y += p.vy;
-                p.vy += 0.08; 
+                p.vy += 0.08; // Gravedad
+                p.vx *= config.particles.drag; // Resistencia del aire
+                p.vy *= config.particles.drag;
                 p.life--;
 
                 if (p.life <= 0) {
@@ -476,12 +517,22 @@
         }
 
         function drawParticles(ctx) {
+            const particleHue = (state.currentHue + 180) % 360;
+            ctx.strokeStyle = `hsla(${particleHue}, ${config.color.saturation}%, ${config.color.glowLightness}%, 0.9)`;
+            ctx.lineWidth = 1;
+
             state.particles.forEach(p => {
-                const particleHue = (state.currentHue + 180) % 360; 
                 const alpha = p.life / p.maxLife;
-                ctx.fillStyle = `hsla(${particleHue}, ${config.color.saturation}%, ${config.color.glowLightness}%, ${alpha * 0.9})`;
-                ctx.fillRect(p.x - 1, p.y - 1, 2, 2);
+                
+                // Dibujar una línea desde la posición anterior a la actual para crear una estela
+                ctx.beginPath();
+                ctx.moveTo(p.prevX, p.prevY);
+                ctx.lineTo(p.x, p.y);
+                ctx.lineWidth = p.size * alpha; // La estela se hace más delgada al desaparecer
+                ctx.globalAlpha = alpha;
+                ctx.stroke();
             });
+            ctx.globalAlpha = 1.0; // Restaurar alpha global
         }
         
         // --- Lógica de Actualización ---
@@ -520,8 +571,25 @@
                         leg.stepProgress = 0;
                         Object.assign(leg.stepStartPos, leg.footPos);
                         leg.currentStepDuration = config.legs.stepDuration;
+                        
+                        // --- LÓGICA DE PREDICCIÓN DE PASO ---
+                        const predictionFrames = config.legs.stepPredictionFrames;
+                        
+                        // Predecir la posición futura del punto de anclaje de la pata
+                        let predictedBodyX = bodyPoint.x + state.headVelocity.x * predictionFrames;
+                        let predictedBodyY = bodyPoint.y + state.headVelocity.y * predictionFrames;
 
-                        leg.stepTargetPos = getLegNaturalRestingPos(bodyPoint, bodyAngle, leg.side, 1.0);
+                        // Limitar la distancia de la predicción para evitar pasos demasiado largos
+                        const predictionDist = Math.hypot(predictedBodyX - bodyPoint.x, predictedBodyY - bodyPoint.y);
+                        if (predictionDist > config.legs.maxPredictionDistance) {
+                            const ratio = config.legs.maxPredictionDistance / predictionDist;
+                            predictedBodyX = bodyPoint.x + (predictedBodyX - bodyPoint.x) * ratio;
+                            predictedBodyY = bodyPoint.y + (predictedBodyY - bodyPoint.y) * ratio;
+                        }
+
+                        // Predecir el ángulo futuro del cuerpo
+                        const predictedBodyAngle = bodyAngle + state.headAngularVelocity * predictionFrames;
+                        leg.stepTargetPos = getLegNaturalRestingPos({ x: predictedBodyX, y: predictedBodyY }, predictedBodyAngle, leg.side, 1.0);
                     }
                 }
             });
@@ -529,22 +597,27 @@
 
         function updateStrike() {
             if (state.isStriking) {
+                // A la mitad de la animación del ataque, crea la explosión de partículas.
                 if (state.strikeProgress === Math.floor(config.strike.duration / 2)) {
+                    // Encuentra la posición de la punta del aguijón para generar las partículas.
                     const tailSegmentIndex = state.spinePoints.length - 2;
                     const p1 = state.spinePoints[tailSegmentIndex];
                     const p2 = state.spinePoints[tailSegmentIndex + 1];
                     const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
                     
+                    // Calcula el ángulo final del aguijón, incluyendo la animación del ataque.
                     const strikePhase = state.strikeProgress / config.strike.duration;
                     const strikeAngleOffset = Math.sin(strikePhase * Math.PI) * config.strike.angleOffset;
-                    const endX = p2.x + config.tail.stingerLength * Math.cos(angle + 0.2 + strikeAngleOffset);
-                    const endY = p2.y + config.tail.stingerLength * Math.sin(angle + 0.2 + strikeAngleOffset);
+                    const finalStrikeAngle = angle + strikeAngleOffset;
+                    const endX = p2.x + config.tail.stingerLength * Math.cos(finalStrikeAngle);
+                    const endY = p2.y + config.tail.stingerLength * Math.sin(finalStrikeAngle);
                     
-                    createParticleExplosion(endX, endY);
+                    createParticleExplosion(endX, endY, finalStrikeAngle);
                 }
 
                 state.strikeProgress++;
                 if (state.strikeProgress >= config.strike.duration) {
+                    // Finaliza la animación del ataque.
                     state.isStriking = false;
                     state.strikeProgress = 0;
                 }
@@ -563,6 +636,8 @@
             const oldHeadX = head.x;
             const oldHeadY = head.y;
 
+            let moveX = 0, moveY = 0;
+
             if (state.isGrabbed && state.grabbedPointIndex !== -1) {
                 // Si está agarrado, el punto del cuerpo sigue al ratón
                 const grabbedPoint = state.spinePoints[state.grabbedPointIndex];
@@ -576,7 +651,6 @@
                 const distToTarget = Math.hypot(state.targetPos.x - head.x, state.targetPos.y - head.y);
 
                 if (distToTarget > 2) {
-                    let moveX, moveY;
                     let currentSpeed = config.movement.walkSpeed;
 
                     const angleToTarget = Math.atan2(state.targetPos.y - head.y, state.targetPos.x - head.x);
@@ -601,11 +675,14 @@
                 }
             }
             
+            state.headVelocity = { x: head.x - oldHeadX, y: head.y - oldHeadY };
             state.headSpeed = Math.hypot(head.x - oldHeadX, head.y - oldHeadY);
             
             const headAngle = Math.atan2(state.spinePoints[1].y - head.y, state.spinePoints[1].x - head.x);
             const angleDifference = (headAngle - state.lastHeadAngle + Math.PI * 3) % (Math.PI * 2) - Math.PI;
+            state.headAngularVelocity = angleDifference;
             state.lastHeadAngle = headAngle;
+            
 
             // --- Actualizar física de la columna (con inercia y balanceo) ---
             for (let i = 1; i < state.spinePoints.length; i++) {
@@ -631,14 +708,23 @@
 
                 // *** NUEVA LÓGICA PARA LA CURVA DE LA COLA ***
                 if (i > config.tail.curlStartSegment) {
+                    // La cola se estira hacia atrás al moverse rápido y se curva más al estar quieto.
+                    const speedFactor = Math.min(state.headSpeed / config.maxSpeed, 1.0);
+                    const dynamicCurl = config.tail.curl - (speedFactor * config.tail.speedCurlFactor);
+
                     const tailProgress = (i - config.tail.curlStartSegment) / (state.spinePoints.length - config.tail.curlStartSegment);
-                    const curlHeight = Math.sin(tailProgress * Math.PI) * config.tail.curl;
+                    const curlHeight = Math.sin(tailProgress * Math.PI) * dynamicCurl;
                     
                     // Aplicar la fuerza de curvatura "hacia arriba" con respecto a la dirección del escorpión
                     const curlAngle = headAngle - Math.PI / 2; 
                     currentPoint.x += Math.cos(curlAngle) * curlHeight;
                     currentPoint.y += Math.sin(curlAngle) * curlHeight;
                 }
+
+                // *** NUEVO: Ondulación vertical del cuerpo al moverse ***
+                const undulationPhase = animationFrame * config.tail.undulationSpeed - i * 0.1;
+                const undulationAmplitude = Math.min(state.headSpeed, 1.5) * config.tail.undulationAmount * Math.sin((i / state.spinePoints.length) * Math.PI);
+                currentPoint.y += Math.sin(undulationPhase) * undulationAmplitude;
             }
 
             for (let j = 0; j < config.physicsIterations; j++) {
@@ -671,9 +757,11 @@
             updateStrike();
             updateParticles();
             updateLegs();
-
+            
+            // Limpia el canvas y redibuja todo.
             ctx.clearRect(0, 0, width, height);
             drawScorpion();
+            // Dibuja las partículas después del escorpión para que aparezcan por encima.
             drawParticles(ctx);
             requestAnimationFrame(animate);
         }
@@ -754,6 +842,13 @@
             if (state.isGrabbed) {
                 state.isGrabbed = false;
                 state.grabbedPointIndex = -1;
+            } else {
+                if (!state.isStriking) {
+                    state.isStriking = true;
+                    state.strikeProgress = 0;
+                    state.strikeTarget.x = state.mouse.x;
+                    state.strikeTarget.y = state.mouse.y;
+                }
             }
         });
 
@@ -765,4 +860,3 @@
         animate();
     </script></body>
 </html>
-
