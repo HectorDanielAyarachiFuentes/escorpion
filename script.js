@@ -59,6 +59,10 @@ const config = {
         undulationSpeed: 0.2,  // Velocidad de la ondulación del cuerpo
         whipAmount: 2.0,       // Amplitud del "latigazo" vertical de la cola al moverse
     },
+    // --- NUEVA CONFIGURACIÓN PARA SEGMENTACIÓN DEL CUERPO ---
+    body: {
+        thoraxEndIndex: 14, // Índice del segmento de la espina dorsal donde termina el tórax
+    },
     pincers: {
         openAngle: 0.6,     // Ángulo de apertura de la pinza
         closedAngle: 0.05,  // Ángulo de cierre
@@ -942,17 +946,26 @@ class Scorpion {
         // Dibujar desde la cola hacia la cabeza para que las placas se superpongan correctamente
         for (let i = bodyEndIndex; i > 1; i--) {
             const p1 = this.spinePoints[i];
-            const p2 = this.spinePoints[i - 1];
+            const p2 = this.spinePoints[i-1];
             const t = i / this.spinePoints.length;
             
-            // Fórmula de ancho modificada para asegurar que la cola tenga un grosor mínimo.
-            const width1 = Math.max(1.5, (3.0 - Math.pow(t, 0.6) * 4.0) * 4.5);
-            const width2 = Math.max(1.5, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 4.5);
+            let width1, width2;
+            // --- LÓGICA DE SEGMENTACIÓN: TÓRAX VS ABDOMEN ---
+            if (i <= this.config.body.thoraxEndIndex) {
+                // Placas del tórax: más anchas y conectadas
+                const thoraxT = (i - 1) / this.config.body.thoraxEndIndex; // Progreso dentro del tórax
+                width1 = 12 + 8 * Math.sin(thoraxT * Math.PI);
+                width2 = 12 + 8 * Math.sin(((i - 2) / this.config.body.thoraxEndIndex) * Math.PI);
+            } else {
+                // Placas del abdomen/cola: más delgadas y afiladas
+                width1 = Math.max(1.5, (3.0 - Math.pow(t, 0.6) * 4.0) * 4.5);
+                width2 = Math.max(1.5, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 4.5);
+            }
 
             if (width1 < 0.5) continue;
 
             const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x) + Math.PI / 2;
-            const angle2 = Math.atan2(p1.y - this.spinePoints[i-2].y, p1.x - this.spinePoints[i-2].x) + Math.PI / 2;
+            const angle2 = (i > 2) ? Math.atan2(p1.y - this.spinePoints[i-2].y, p1.x - this.spinePoints[i-2].x) + Math.PI / 2 : angle1;
 
             // Vértices de la placa (un cuadrilátero)
             const p1_left = { x: p1.x + width1 * Math.cos(angle1), y: p1.y + width1 * Math.sin(angle1) };
