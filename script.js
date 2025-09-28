@@ -662,8 +662,8 @@ class Scorpion {
             const t = i / this.spinePoints.length;
             
             // Fórmula de ancho modificada para asegurar que la cola tenga un grosor mínimo.
-            const width1 = Math.max(0.8, (3.0 - Math.pow(t, 0.6) * 4.0) * 2.8);
-            const width2 = Math.max(0.8, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 2.8);
+            const width1 = Math.max(1.0, (3.0 - Math.pow(t, 0.6) * 4.0) * 3.5);
+            const width2 = Math.max(1.0, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 3.5);
 
             if (width1 < 0.5) continue;
 
