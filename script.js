@@ -22,12 +22,12 @@ const config = {
         }
     },
     legs: {
-        indices: [2, 5, 8, 11], // 4 pares de patas = 8 patas en total
-        angles: [1.1, 1.3, 1.5, 1.7], // Ángulos distintos para cada par de patas
+        indices: [2, 4, 6, 8, 10, 12, 14, 16], // 8 pares de patas = 16 patas en total
+        angles: [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8], // Ángulos distintos para cada par de patas
         naturalLength: 50,
         legWidth: 4.5, // Grosor base de la pata
-        segment1: 30, 
-        segment2: 25, 
+        segment1: 30,
+        segment2: 25,
         segment3: 15, 
         stepThreshold: 30, // Pasos más largos y deliberados (REDUCIDO para más reactividad)
         stepDuration: 18,  // Pasos más rápidos y firmes
@@ -62,7 +62,8 @@ const config = {
     },
     // --- NUEVA CONFIGURACIÓN PARA SEGMENTACIÓN DEL CUERPO ---
     body: {
-        thoraxEndIndex: 14, // Índice del segmento de la espina dorsal donde termina el tórax
+        thoraxEndIndex: 18, // Índice del segmento de la espina dorsal donde termina el tórax
+        abdomenRingScale: 6.5, // Factor de tamaño para los anillos de la cola
     },
     pincers: {
         openAngle: 0.6,     // Ángulo de apertura de la pinza
@@ -92,10 +93,10 @@ const config = {
         lightness: 80,      
         glowLightness: 50,  
         hueChangeSpeed: 0.1, 
-        glowBlur: 12,       // Brillo base
+        glowBlur: 8,       // Brillo base (REDUCIDO)
         glowPulseSpeed: 0.08, // Velocidad del pulso de brillo
-        glowPulseAmount: 4,   // Amplitud del pulso (en píxeles de blur)
-        postStrikeGlowBoost: 15, // Aumento de brillo extra tras atacar
+        glowPulseAmount: 3,   // Amplitud del pulso (REDUCIDO)
+        postStrikeGlowBoost: 10, // Aumento de brillo extra tras atacar (REDUCIDO)
         postStrikeGlowDecay: 0.95 // Velocidad a la que se desvanece el brillo extra
     }
     ,
@@ -160,13 +161,10 @@ class Particle {
         
         this.x = x;
         this.y = y;
-        this.prevX = x;
-        this.prevY = y;
         this.vx = Math.cos(sprayAngle) * speed;
         this.vy = Math.sin(sprayAngle) * speed;
         this.life = config.minLife + Math.random() * (config.maxLife - config.minLife);
         this.maxLife = config.maxLife;
-        this.size = 1 + Math.random() * 2.5;
         this.drag = config.drag;
         this.hue = (hue + 180) % 360;
         this.saturation = config.saturation;
@@ -174,8 +172,6 @@ class Particle {
     }
 
     update() {
-        this.prevX = this.x;
-        this.prevY = this.y;
         this.x += this.vx;
         this.y += this.vy;
         this.vy += 0.08; // Gravedad
@@ -188,11 +184,10 @@ class Particle {
     draw(ctx) {
         const alpha = this.life / this.maxLife;
         ctx.beginPath();
-        ctx.moveTo(this.prevX, this.prevY);
-        ctx.lineTo(this.x, this.y);
-        ctx.lineWidth = this.size * alpha;
-        ctx.strokeStyle = `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${alpha * 0.9})`;
-        ctx.stroke();
+        // Dibujar círculos es más rápido que líneas para partículas pequeñas
+        ctx.arc(this.x, this.y, 1.5 * alpha, 0, Math.PI * 2);
+        ctx.fillStyle = `hsla(${this.hue}, ${this.saturation}%, ${this.lightness}%, ${alpha * 0.8})`;
+        ctx.fill();
     }
 }
 
@@ -224,8 +219,11 @@ class Leg {
     }
 
     update(bodyPoint, bodyAngle, headVelocity, headAngularVelocity, headSpeed, canStep, isGrabbed, onStepCallback) {
+        // --- OPTIMIZACIÓN: Usar distancia al cuadrado para evitar Math.hypot ---
         const naturalPos = this._getNaturalRestingPos(bodyPoint, bodyAngle, 1.0);
-        const distFromNatural = Math.hypot(this.footPos.x - naturalPos.x, this.footPos.y - naturalPos.y);
+        const dx = this.footPos.x - naturalPos.x;
+        const dy = this.footPos.y - naturalPos.y;
+        const distSqFromNatural = dx * dx + dy * dy;
 
         if (this.isStepping) {
             this.stepProgress++;
@@ -247,7 +245,7 @@ class Leg {
             }
         } else { // --- LÓGICA DE PASO MEJORADA ---
             // Se elimina la condición `headSpeed > 0.2` para permitir que las patas se reajusten incluso en reposo.
-            if (distFromNatural > this.config.stepThreshold && canStep && !isGrabbed) {
+            if (distSqFromNatural > this.config.stepThreshold * this.config.stepThreshold && canStep && !isGrabbed) {
                 this.isStepping = true;
                 this.stepProgress = 0;
                 Object.assign(this.stepStartPos, this.footPos);
@@ -293,10 +291,10 @@ class Leg {
         }
         footY -= lift;
 
-        const seg1_len = this.config.segment1; 
+        const seg1_len = this.config.segment1;
         const seg2_len = this.config.segment2 + this.config.segment3;
         const dist = Math.hypot(startX - footX, startY - footY);
-        const maxReach = seg1_len + seg2_len - 1;
+        const maxReach = seg1_len + seg2_len - 1; // Evita que la pata se estire completamente
         let jointX, jointY;
 
         if (dist >= maxReach) {
@@ -315,26 +313,26 @@ class Leg {
         const leg_seg2_len = this.config.segment2;
         const joint2X = jointX + leg_seg2_len * Math.cos(leg_seg2_angle);
         const joint2Y = jointY + leg_seg2_len * Math.sin(leg_seg2_angle);
-        
+
         // --- LÓGICA DE DIBUJO DE PATAS MÁS DELGADAS Y ARTICULADAS ---
         ctx.beginPath();
         ctx.moveTo(startX, startY);
         ctx.lineWidth = this.config.legWidth; // Segmento más grueso
-        ctx.lineTo(jointX, jointY);
+        ctx.lineTo(jointX, jointY); // Rodilla
         ctx.stroke();
 
         ctx.beginPath();
         ctx.moveTo(jointX, jointY);
         ctx.lineWidth = this.config.legWidth * 0.7; // Segmento intermedio
-        ctx.lineTo(joint2X, joint2Y);
+        ctx.lineTo(joint2X, joint2Y); // Tobillo
         ctx.stroke();
 
         ctx.beginPath();
         ctx.moveTo(joint2X, joint2Y);
         ctx.lineWidth = this.config.legWidth * 0.4; // Segmento más fino
         ctx.lineTo(footX, footY); 
-        ctx.stroke();
-        
+        ctx.stroke(); // El pie
+
         // Dibujar los nodos iluminados en las articulaciones
         ctx.save();
         const glowColor = `hsl(${hue}, ${colorConfig.saturation}%, ${colorConfig.glowLightness}%)`;
@@ -352,7 +350,7 @@ class Leg {
         ctx.fill();
         // Articulación del "tobillo"
         ctx.beginPath();
-        ctx.arc(joint2X, joint2Y, 1.0, 0, Math.PI * 2); 
+        ctx.arc(joint2X, joint2Y, 1.0, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
     }
@@ -616,6 +614,11 @@ class Scorpion {
         this.lastHeadAngle = this.headAngle;
     }
 
+    _updateHeadVelocity(newX, newY, oldX, oldY) {
+        this.headVelocity.x = newX - oldX;
+        this.headVelocity.y = newY - oldY;
+    }
+
     _updateSpinePhysics() {
         // Primero, aplicamos el movimiento secundario (balanceo, ondulación)
         for (let i = 1; i < this.spinePoints.length; i++) {
@@ -655,7 +658,7 @@ class Scorpion {
             for (let i = this.config.tail.curlStartSegment; i < this.spinePoints.length; i++) {
                 const point = this.spinePoints[i];
                 const progress = (i - this.config.tail.curlStartSegment) / (this.spinePoints.length - this.config.tail.curlStartSegment);
-                const pullFactor = 0.05 * Math.pow(progress, 2); // La fuerza es mayor al final de la cola
+                const pullFactor = 0.04 * Math.pow(progress, 2); // La fuerza es mayor al final de la cola (LIGERAMENTE REDUCIDO)
                 
                 point.x += (targetX - point.x) * pullFactor;
                 point.y += (targetY - point.y) * pullFactor;
@@ -930,23 +933,17 @@ class Scorpion {
         this.ctx.shadowColor = glowColor;
         
         // Brillo dinámico basado en el movimiento
-        const speedGlow = Math.min(this.headSpeed * 0.5, 2);
+        const speedGlow = Math.min(this.headSpeed * 0.4, 1.5); // Ligeramente reducido
         this.ctx.shadowBlur = this.config.color.glowBlur + 
                               Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount + 
                               this.postStrikeGlow +
                               speedGlow;
 
-        this.legs.forEach(leg => {
-            const bodyPoint = this.spinePoints[leg.spineIndex];
-            leg.draw(this.ctx, bodyPoint, this.currentHue, this.config.color);
-        });
-
-        // Dibujar las articulaciones de las pinzas con brillo
+        // --- OPTIMIZACIÓN: Reordenar el dibujado para evitar dibujar las patas dos veces ---
+        // 1. Dibujar las articulaciones de las pinzas (que van por debajo de las patas)
         this._drawPincerJoints();
 
-        // Volvemos a dibujar las patas para que las articulaciones del cuerpo queden por encima
-        // pero las articulaciones de las pinzas por debajo.
-        this.ctx.shadowBlur = 0; // Sin brillo para esta pasada
+        // 2. Dibujar las patas UNA SOLA VEZ
         this.legs.forEach(leg => {
             const bodyPoint = this.spinePoints[leg.spineIndex];
             leg.draw(this.ctx, bodyPoint, this.currentHue, this.config.color);
@@ -979,30 +976,48 @@ class Scorpion {
                 width2 = 12 + 8 * Math.sin(((i - 2) / this.config.body.thoraxEndIndex) * Math.PI);
             } else {
                 // Placas del abdomen/cola: más delgadas y afiladas
-                width1 = Math.max(1.5, (3.0 - Math.pow(t, 0.6) * 4.0) * 4.5);
-                width2 = Math.max(1.5, (3.0 - Math.pow((i - 1) / this.spinePoints.length, 0.6) * 4.0) * 4.5);
+                // --- LÓGICA MEJORADA PARA ANILLOS DE LA COLA ---
+                const abdomenT = (i - this.config.body.thoraxEndIndex) / (this.spinePoints.length - this.config.body.thoraxEndIndex);
+                const ringPulse = Math.sin(abdomenT * Math.PI * 12) * 0.5 + 0.5; // Crea valles y crestas
+                width1 = this.config.body.abdomenRingScale * (1 - abdomenT * 0.5) * ringPulse;
+                
+                const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x) + Math.PI / 2;
+                const p1_left = { x: p1.x + width1 * Math.cos(angle1), y: p1.y + width1 * Math.sin(angle1) };
+                const p1_right = { x: p1.x - width1 * Math.cos(angle1), y: p1.y - width1 * Math.sin(angle1) };
+                
+                // Usamos el mismo ancho para el punto siguiente para crear un "anillo"
+                const p2_left = { x: p2.x + width1 * Math.cos(angle1), y: p2.y + width1 * Math.sin(angle1) };
+                const p2_right = { x: p2.x - width1 * Math.cos(angle1), y: p2.y - width1 * Math.sin(angle1) };
+
+                this.ctx.beginPath();
+                this.ctx.moveTo(p1_left.x, p1_left.y);
+                this.ctx.quadraticCurveTo(p2.x, p2.y, p2_left.x, p2_left.y); // Curva hacia el siguiente punto
+                this.ctx.lineTo(p2_right.x, p2_right.y);
+                this.ctx.quadraticCurveTo(p2.x, p2.y, p1_right.x, p1_right.y); // Curva de vuelta
+                this.ctx.closePath();
+                this.ctx.fill();
+                this.ctx.stroke();
+
+                continue; // Saltar la lógica de dibujo de placas planas
             }
 
             if (width1 < 0.5) continue;
 
             const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x) + Math.PI / 2;
             const angle2 = (i > 2) ? Math.atan2(p1.y - this.spinePoints[i-2].y, p1.x - this.spinePoints[i-2].x) + Math.PI / 2 : angle1;
-
-            // Vértices de la placa (un cuadrilátero)
             const p1_left = { x: p1.x + width1 * Math.cos(angle1), y: p1.y + width1 * Math.sin(angle1) };
             const p1_right = { x: p1.x - width1 * Math.cos(angle1), y: p1.y - width1 * Math.sin(angle1) };
             const p2_left = { x: p2.x + width2 * Math.cos(angle2), y: p2.y + width2 * Math.sin(angle2) };
             const p2_right = { x: p2.x - width2 * Math.cos(angle2), y: p2.y - width2 * Math.sin(angle2) };
 
             this.ctx.beginPath();
-            this.ctx.moveTo(p1_left.x, p1_left.y);
-            this.ctx.lineTo(p2_left.x, p2_left.y);
-            this.ctx.lineTo(p2_right.x, p2_right.y);
-            this.ctx.lineTo(p1_right.x, p1_right.y);
+            this.ctx.moveTo(p1_left.x, p1_left.y); this.ctx.lineTo(p2_left.x, p2_left.y);
+            this.ctx.lineTo(p2_right.x, p2_right.y); this.ctx.lineTo(p1_right.x, p1_right.y);
             this.ctx.closePath();
 
             this.ctx.fill();
             this.ctx.stroke();
+
         }
         // --- FIN DE LA LÓGICA DEL CUERPO SEGMENTADO ---
 
@@ -1016,56 +1031,47 @@ class Scorpion {
 
     _drawParticles() {
         this.ctx.save();
-        this.particles.forEach(p => p.draw(this.ctx));
+        this.particles.forEach(p => p.draw(this.ctx)); // El shadowBlur del escorpión no afecta a las partículas
         this.ctx.restore();
     }
 
     _drawShadow() {
+        // --- OPTIMIZACIÓN: Reemplazar gradiente con un círculo simple para mejorar el rendimiento ---
         this.ctx.save();
         const shadowCenter = this.spinePoints[8];
         if (!shadowCenter) return;
 
-        const gradient = this.ctx.createRadialGradient(shadowCenter.x, shadowCenter.y + 10, 5, shadowCenter.x, shadowCenter.y + 10, 80);
-        const shadowColor = `hsla(${this.currentHue}, 90%, 10%, 0.4)`;
-        gradient.addColorStop(0, shadowColor);
-        gradient.addColorStop(1, 'transparent');
+        // Un color oscuro semitransparente es suficiente y mucho más rápido.
+        const shadowColor = `hsla(${this.currentHue}, 50%, 10%, 0.35)`;
+        this.ctx.fillStyle = shadowColor;
+        this.ctx.filter = 'blur(15px)'; // Usar filtro de CSS es a veces más rápido que shadowBlur.
 
-        this.ctx.fillStyle = gradient;
         this.ctx.beginPath();
-        this.ctx.ellipse(shadowCenter.x, shadowCenter.y + 10, 90, 40, this.headAngle, 0, Math.PI * 2);
+        this.ctx.ellipse(shadowCenter.x, shadowCenter.y + 15, 60, 30, 0, 0, Math.PI * 2);
         this.ctx.fill();
-
         this.ctx.restore();
     }
 
     _drawHead(x, y, angle, size) {
         this.ctx.save();
         this.ctx.beginPath();
+        this.ctx.translate(x, y);
+        this.ctx.rotate(angle);
 
         const width = size * this.config.head.widthFactor;
         const length = size * this.config.head.lengthFactor;
         
-        const pFront = { x: length, y: 0 };
-        const pFrontSideL = { x: length * 0.6, y: -width/2.5 };
-        const pFrontSideR = { x: length * 0.6, y: width/2.5 };
-        const pBackSideL = { x: -length * 0.8, y: -width/2 };
-        const pBackSideR = { x: -length * 0.8, y: width/2 };
+        // --- OPTIMIZACIÓN: Dibujar la forma relativa al origen (0,0) y usar transformaciones ---
+        const pFrontX = length;
+        const pFrontSideLX = length * 0.6; const pFrontSideLY = -width / 2.5;
+        const pFrontSideRX = length * 0.6; const pFrontSideRY = width / 2.5;
+        const pBackSideLX = -length * 0.8; const pBackSideLY = -width / 2;
+        const pBackSideRX = -length * 0.8; const pBackSideRY = width / 2;
         
-        const rotatePoint = (p) => ({
-            x: p.x * Math.cos(angle) - p.y * Math.sin(angle),
-            y: p.x * Math.sin(angle) + p.y * Math.cos(angle)
-        });
-
-        const rpFront = rotatePoint(pFront);
-        const rpFrontSideL = rotatePoint(pFrontSideL);
-        const rpFrontSideR = rotatePoint(pFrontSideR);
-        const rpBackSideL = rotatePoint(pBackSideL);
-        const rpBackSideR = rotatePoint(pBackSideR);
-        
-        this.ctx.moveTo(x + rpBackSideL.x, y + rpBackSideL.y);
-        this.ctx.lineTo(x + rpFrontSideL.x, y + rpFrontSideL.y);
-        this.ctx.quadraticCurveTo(x + rpFront.x, y + rpFront.y, x + rpFrontSideR.x, y + rpFrontSideR.y);
-        this.ctx.lineTo(x + rpBackSideR.x, y + rpBackSideR.y);
+        this.ctx.moveTo(pBackSideLX, pBackSideLY);
+        this.ctx.lineTo(pFrontSideLX, pFrontSideLY);
+        this.ctx.quadraticCurveTo(pFrontX, 0, pFrontSideRX, pFrontSideRY);
+        this.ctx.lineTo(pBackSideRX, pBackSideRY);
         this.ctx.closePath();
         
         this.ctx.fillStyle = '#000';
@@ -1073,7 +1079,8 @@ class Scorpion {
         this.ctx.stroke();
         
         this._drawEyes(x, y, angle);
-
+        
+        // Restaurar la transformación al final
         this.ctx.restore();
     }
 
@@ -1130,6 +1137,11 @@ class Scorpion {
 
     _drawPincers(headX, headY, headAngle, overrideAnchor, overrideJoints) {
         this.ctx.save();
+        // Guardamos el estado del contexto antes de cualquier dibujo de pinza
+        // para que las transformaciones de una no afecten a la otra.
+        const originalCtxState = this.ctx.getTransform();
+
+        const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
         
         for (let side = -1; side <= 1; side += 2) {
             const sideKey = side === -1 ? 'left' : 'right';
@@ -1145,25 +1157,34 @@ class Scorpion {
             const handX = joints.hand.x;
             const handY = joints.hand.y;
 
+            // --- OPTIMIZACIÓN: Usar transformaciones en lugar de cálculos manuales ---
+            this.ctx.save();
+            this.ctx.translate(elbowX, elbowY);
+            const armAngle = Math.atan2(handY - elbowY, handX - elbowX);
+            this.ctx.rotate(armAngle);
+
             // Dibujar el primer segmento del brazo
+            this.ctx.save();
+            this.ctx.setTransform(originalCtxState); // Reset transform for this line
             this.ctx.lineWidth = this.config.pincers.armWidth * 0.8;
             this.ctx.beginPath();
             this.ctx.moveTo(armBaseX, armBaseY);
             this.ctx.lineTo(elbowX, elbowY);
             this.ctx.stroke();
+            this.ctx.restore();
 
-            // Dibujar la "mano" (quela)
+            // Dibujar la "mano" (quela) - ahora relativa al codo (0,0)
             this.ctx.beginPath();
             const handWidth = this.config.pincers.handWidth;
             const armWidth = this.config.pincers.armWidth;
-            const armAngle = Math.atan2(handY - elbowY, handX - elbowX);
-            const anglePerp = armAngle + Math.PI / 2;
-            const p_base_in = { x: elbowX - side * armWidth/2 * Math.cos(anglePerp), y: elbowY - side * armWidth/2 * Math.sin(anglePerp) };
-            const p_base_out = { x: elbowX + side * armWidth/2 * Math.cos(anglePerp), y: elbowY + side * armWidth/2 * Math.sin(anglePerp) };
-            const p_hand_in = { x: handX - side * handWidth/2 * Math.cos(anglePerp), y: handY - side * handWidth/2 * Math.sin(anglePerp) };
-            const p_hand_out = { x: handX + side * handWidth/2 * Math.cos(anglePerp), y: handY + side * handWidth/2 * Math.sin(anglePerp) };
-            const p_hand_out_ctrl1 = { x: handX + side * handWidth * 0.8 * Math.cos(anglePerp) - handWidth * 0.2 * Math.cos(armAngle), y: handY + side * handWidth * 0.8 * Math.sin(anglePerp) - handWidth * 0.2 * Math.sin(armAngle) };
-            const p_hand_out_ctrl2 = { x: p_base_out.x + (handX - elbowX) * 0.2, y: p_base_out.y + (handY - elbowY) * 0.2 };
+            const handDist = Math.hypot(handX - elbowX, handY - elbowY);
+
+            const p_base_in = { x: 0, y: -side * armWidth/2 };
+            const p_base_out = { x: 0, y: side * armWidth/2 };
+            const p_hand_in = { x: handDist, y: -side * handWidth/2 };
+            const p_hand_out = { x: handDist, y: side * handWidth/2 };
+            const p_hand_out_ctrl1 = { x: handDist - handWidth * 0.2, y: side * handWidth * 0.8 };
+            const p_hand_out_ctrl2 = { x: handDist * 0.2, y: side * armWidth/2 };
 
             this.ctx.moveTo(p_base_in.x, p_base_in.y);
             this.ctx.lineTo(p_hand_in.x, p_hand_in.y);
@@ -1175,45 +1196,36 @@ class Scorpion {
             this.ctx.fill();
             this.ctx.stroke();
     
-            // --- LÓGICA DE DIBUJO DE PINZAS MEJORADA ---
-            const handAngle = Math.atan2(handY - elbowY, handX - elbowX);
+            // --- LÓGICA DE DIBUJO DE PINZAS MEJORADA (relativa a la mano) ---
             const fingerLength = this.config.pincers.lengthFinger;
-    
-            // Pinza móvil: más curvada y con punta afilada
-            const mobileClawAngle = handAngle + (side * this.pincerAngle);
-            const mobileClawEndX = handX + fingerLength * Math.cos(mobileClawAngle);
-            const mobileClawEndY = handY + fingerLength * Math.sin(mobileClawAngle);
-            const mobileClawControl1X = handX + fingerLength * 0.4 * Math.cos(mobileClawAngle + side * 0.1);
-            const mobileClawControl1Y = handY + fingerLength * 0.4 * Math.sin(mobileClawAngle + side * 0.1);
-            const mobileClawControl2X = handX + fingerLength * 0.8 * Math.cos(mobileClawAngle + side * 0.3);
-            const mobileClawControl2Y = handY + fingerLength * 0.8 * Math.sin(mobileClawAngle + side * 0.3);
-    
-            // Pinza fija: con un "diente" y punta más definida
-            const fixedClawAngle = handAngle - (side * 0.4); 
-            const fixedClawEndX = handX + fingerLength * 0.9 * Math.cos(fixedClawAngle);
-            const fixedClawEndY = handY + fingerLength * 0.9 * Math.sin(fixedClawAngle);
-            const fixedClawControl1X = handX + fingerLength * 0.3 * Math.cos(fixedClawAngle - side * 0.1);
-            const fixedClawControl1Y = handY + fingerLength * 0.3 * Math.sin(fixedClawAngle - side * 0.1);
-            const fixedClawControl2X = handX + fingerLength * 0.7 * Math.cos(fixedClawAngle - side * 0.3);
-            const fixedClawControl2Y = handY + fingerLength * 0.7 * Math.sin(fixedClawAngle - side * 0.3);
+            const handOriginX = handDist; const handOriginY = 0;
+
+            const drawClaw = (baseAngle, length, curve1, curve2) => {
+                const endX = handOriginX + length * Math.cos(baseAngle);
+                const endY = handOriginY + length * Math.sin(baseAngle);
+                const ctrl1X = handOriginX + length * 0.4 * Math.cos(baseAngle + curve1);
+                const ctrl1Y = handOriginY + length * 0.4 * Math.sin(baseAngle + curve1);
+                const ctrl2X = handOriginX + length * 0.8 * Math.cos(baseAngle + curve2);
+                const ctrl2Y = handOriginY + length * 0.8 * Math.sin(baseAngle + curve2);
+                this.ctx.moveTo(handOriginX, handOriginY);
+                this.ctx.bezierCurveTo(ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY);
+            };
             
             this.ctx.beginPath();
-            this.ctx.moveTo(handX, handY); 
-            this.ctx.bezierCurveTo(mobileClawControl1X, mobileClawControl1Y, mobileClawControl2X, mobileClawControl2Y, mobileClawEndX, mobileClawEndY);
-            this.ctx.moveTo(handX, handY); 
-            this.ctx.bezierCurveTo(fixedClawControl1X, fixedClawControl1Y, fixedClawControl2X, fixedClawControl2Y, fixedClawEndX, fixedClawEndY);
+            drawClaw(side * this.pincerAngle, fingerLength, side * 0.1, side * 0.3); // Móvil
+            drawClaw(-side * 0.4, fingerLength * 0.9, -side * 0.1, -side * 0.3); // Fija
             this.ctx.lineWidth = 4.5;
             this.ctx.stroke();
 
             // Resaltar la articulación de la mano
             this.ctx.save();
-            const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
             this.ctx.fillStyle = glowColor;
             this.ctx.beginPath();
-            this.ctx.arc(handX, handY, 2.5, 0, Math.PI * 2);
+            this.ctx.arc(handOriginX, handOriginY, 2.5, 0, Math.PI * 2);
             this.ctx.fill();
             this.ctx.restore();
 
+            this.ctx.restore(); // Restaura la transformación de esta pinza
         }
         this.ctx.restore();
     }
