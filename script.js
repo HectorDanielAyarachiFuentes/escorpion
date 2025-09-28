@@ -94,6 +94,13 @@ const config = {
         postStrikeGlowDecay: 0.95 // Velocidad a la que se desvanece el brillo extra
     }
     ,
+    // --- Nueva configuración para el destello de las pinzas ---
+    pincerFlash: {
+        count: 5,
+        minLife: 10, maxLife: 20, minSpeed: 1, maxSpeed: 2.5,
+        sprayAngle: Math.PI * 2, drag: 0.94
+    }
+    ,
     // --- Nueva configuración para el polvo de las patas ---
     dust: {
         count: 4,           // Pocas partículas para un efecto sutil
@@ -130,6 +137,7 @@ const state = {
     postStrikeGlow: 0, // Intensidad actual del brillo post-ataque
     eyeGlow: 0, // Intensidad del brillo de los ojos (0 a 1)
 };
+state.lastPincerAngle = config.pincers.openAngle;
 state.pincerAngle = config.pincers.openAngle; // Estado inicial de las pinzas
 
 function initAnimationState() {
@@ -257,7 +265,7 @@ class Leg {
         }
     }
 
-    draw(ctx, bodyPoint) {
+    draw(ctx, bodyPoint, hue, colorConfig) {
         ctx.save();
         ctx.lineWidth = 0.9;
         
@@ -298,11 +306,6 @@ class Leg {
         }
 
         ctx.beginPath();
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.arc(startX, startY, 1.8, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.beginPath();
         ctx.moveTo(startX, startY);
         ctx.lineTo(jointX, jointY); 
 
@@ -315,12 +318,25 @@ class Leg {
         ctx.lineTo(footX, footY); 
         ctx.stroke();
         
+        // Dibujar los nodos iluminados en las articulaciones
+        ctx.save();
+        const glowColor = `hsl(${hue}, ${colorConfig.saturation}%, ${colorConfig.glowLightness}%)`;
+        ctx.fillStyle = glowColor;
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = 5;
+
+        // Articulación del cuerpo
         ctx.beginPath();
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.arc(jointX, jointY, 1.2, 0, Math.PI * 2);
+        ctx.arc(startX, startY, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        // Articulación de la "rodilla"
+        ctx.beginPath();
+        ctx.arc(jointX, jointY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        // Articulación del "tobillo"
+        ctx.beginPath();
         ctx.arc(joint2X, joint2Y, 1.0, 0, Math.PI * 2); 
         ctx.fill();
-
         ctx.restore();
     }
 }
@@ -365,7 +381,15 @@ class Scorpion {
         this.postStrikeGlow = 0;
         this.eyeGlow = 0;
         this.pincerAngle = this.config.pincers.openAngle;
+        this.lastPincerAngle = this.config.pincers.openAngle;
         this.pincerJoints = {}; // Para la nueva física de pinzas
+
+        // --- Estados para la descomposición ---
+        this.isDeconstructed = false;
+        this.isDeconstructing = false;
+        this.isReconstructing = false;
+        this.deconstructionProgress = 0;
+        this.deconstructedParts = [];
 
         this.particles = [];
         this._initLegs();
@@ -425,6 +449,63 @@ class Scorpion {
         }
     }
 
+    toggleDeconstruction() {
+        if (this.isDeconstructing || this.isReconstructing) return;
+
+        if (this.isDeconstructed) {
+            this.isReconstructing = true;
+            this.deconstructionProgress = 0;
+        } else {
+            this.isDeconstructing = true;
+            this.deconstructionProgress = 0;
+            this._captureDeconstructionState();
+        }
+    }
+
+    _captureDeconstructionState() {
+        this.deconstructedParts = [];
+        const center = { x: this.canvas.width / (2 * this.dpr), y: this.canvas.height / (2 * this.dpr) };
+
+        // Capturar segmentos del cuerpo
+        this.spinePoints.forEach((p, i) => {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 150 + Math.random() * 150;
+            this.deconstructedParts.push({
+                type: 'spine',
+                index: i,
+                homePos: { ...p },
+                targetPos: { x: center.x + dist * Math.cos(angle), y: center.y + dist * Math.sin(angle) }
+            });
+        });
+
+        // Capturar patas
+        this.legs.forEach((leg, i) => {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 200 + Math.random() * 200;
+            this.deconstructedParts.push({
+                type: 'leg',
+                index: i,
+                homeBodyPoint: { ...this.spinePoints[leg.spineIndex] },
+                homeFootPos: { ...leg.footPos },
+                targetPos: { x: center.x + dist * Math.cos(angle), y: center.y + dist * Math.sin(angle) }
+            });
+        });
+
+        // Capturar pinzas
+        Object.keys(this.pincerJoints).forEach(sideKey => {
+            const joints = this.pincerJoints[sideKey];
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 180 + Math.random() * 180;
+            this.deconstructedParts.push({
+                type: 'pincer',
+                sideKey: sideKey,
+                homeAnchor: { ...this.spinePoints[1] },
+                homeJoints: JSON.parse(JSON.stringify(joints)), // Deep copy
+                targetPos: { x: center.x + dist * Math.cos(angle), y: center.y + dist * Math.sin(angle) }
+            });
+        });
+    }
+
     // --- Lógica de actualización principal ---
     update() {
         this.animationFrame++;
@@ -432,6 +513,11 @@ class Scorpion {
 
         if (this.postStrikeGlow > 0.1) {
             this.postStrikeGlow *= this.config.color.postStrikeGlowDecay;
+        }
+
+        if (this.isDeconstructing || this.isReconstructing) {
+            this._updateDeconstruction();
+            return; // Pausar la física normal durante la animación
         }
 
         this._updateMovement();
@@ -444,6 +530,26 @@ class Scorpion {
         this._updateEyes();
     }
 
+    _updateDeconstruction() {
+        const duration = 120; // frames
+        this.deconstructionProgress += 1 / duration;
+
+        if (this.deconstructionProgress >= 1) {
+            this.deconstructionProgress = 1;
+            if (this.isDeconstructing) {
+                this.isDeconstructing = false;
+                this.isDeconstructed = true;
+                document.getElementById('deconstructBtn').innerText = 'Armar';
+            }
+            if (this.isReconstructing) {
+                this.isReconstructing = false;
+                this.isDeconstructed = false;
+                this.deconstructedParts = []; // Limpiar estado
+                document.getElementById('deconstructBtn').innerText = 'Desarmar';
+            }
+        }
+    }
+
     _updateMovement() {
         const head = this.spinePoints[0];
         const oldHeadX = head.x;
@@ -452,7 +558,7 @@ class Scorpion {
         if (this.isGrabbed && this.grabbedPointIndex !== -1) {
             const grabbedPoint = this.spinePoints[this.grabbedPointIndex];
             grabbedPoint.x = this.mouse.x;
-            grabbedPoint.y = this.mouse.y;
+            grabbedPoint.y = this.mouse.y; 
         } else {
             this.targetPos.x = this.mouse.x;
             this.targetPos.y = this.mouse.y;
@@ -627,8 +733,18 @@ class Scorpion {
     _updatePincers() {
         const head = this.spinePoints[0];
         const distToMouse = Math.hypot(this.mouse.x - head.x, this.mouse.y - head.y);
-        let targetAngle = (distToMouse < this.config.pincers.snapDistance && !this.isGrabbed) ? this.config.pincers.closedAngle : this.config.pincers.openAngle;
+        const isClosing = (distToMouse < this.config.pincers.snapDistance && !this.isGrabbed);
+        let targetAngle = isClosing ? this.config.pincers.closedAngle : this.config.pincers.openAngle;
+
+        // Detectar si las pinzas se acaban de cerrar para crear un destello
+        if (isClosing && this.pincerAngle > (this.config.pincers.closedAngle + 0.1)) {
+            if (this.lastPincerAngle > this.pincerAngle) { // Si se está moviendo para cerrar
+                this._createPincerFlash();
+            }
+        }
+
         this.pincerAngle += (targetAngle - this.pincerAngle) * this.config.pincers.snapLerpFactor;
+        this.lastPincerAngle = this.pincerAngle;
     }
 
     _updatePincerPhysics() {
@@ -659,32 +775,168 @@ class Scorpion {
         }
     }
 
+    _createPincerFlash() {
+        for (let side = -1; side <= 1; side += 2) {
+            const sideKey = side === -1 ? 'left' : 'right';
+            const joints = this.pincerJoints[sideKey];
+            if (!joints) continue;
+
+            const handX = joints.hand.x;
+            const handY = joints.hand.y;
+            const config = this.config.pincerFlash;
+            for (let i = 0; i < config.count; i++) {
+                this.particles.push(new Particle(handX, handY, Math.random() * Math.PI * 2, config, this.currentHue));
+            }
+        }
+    }
+
     // --- Métodos de Dibujo ---
     draw() {
         const width = this.canvas.width / this.dpr;
         const height = this.canvas.height / this.dpr;
         this.ctx.clearRect(0, 0, width, height);
 
-        this._drawScorpion();
+        if (this.isDeconstructed || this.isDeconstructing || this.isReconstructing) {
+            this._drawDeconstructed();
+        } else {
+            this._drawScorpion();
+        }
+
         this._drawParticles();
+    }
+
+    _drawDeconstructed() {
+        let t = this.deconstructionProgress;
+        t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // Ease in-out
+
+        const bodyColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
+        const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
+        this.ctx.strokeStyle = bodyColor;
+        this.ctx.shadowColor = glowColor;
+        this.ctx.shadowBlur = this.config.color.glowBlur;
+
+        this.deconstructedParts.filter(p => p.type === 'leg').forEach(p => {
+            const leg = this.legs[p.index];
+            const fromBody = this.isReconstructing ? p.targetPos : p.homeBodyPoint;
+            const toBody = this.isReconstructing ? p.homeBodyPoint : p.targetPos;
+            const bodyPoint = {
+                x: fromBody.x + (toBody.x - fromBody.x) * t,
+                y: fromBody.y + (toBody.y - fromBody.y) * t
+            };
+            leg.footPos = p.homeFootPos; // Mantener el pie en su sitio para el dibujo
+            leg.draw(this.ctx, bodyPoint, this.currentHue, this.config.color);
+        });
+
+        // Dibujar pinzas desarmadas
+        this.deconstructedParts.filter(p => p.type === 'pincer').forEach(p => {
+            const fromAnchor = this.isReconstructing ? p.targetPos : p.homeAnchor;
+            const toAnchor = this.isReconstructing ? p.homeAnchor : p.targetPos;
+            const anchor = {
+                x: fromAnchor.x + (toAnchor.x - fromAnchor.x) * t,
+                y: fromAnchor.y + (toAnchor.y - fromAnchor.y) * t
+            };
+
+            // Mantenemos la forma de la pinza relativa a su ancla en movimiento
+            const offsetXElbow = p.homeJoints.elbow.x - p.homeAnchor.x;
+            const offsetYElbow = p.homeJoints.elbow.y - p.homeAnchor.y;
+            const offsetXHand = p.homeJoints.hand.x - p.homeAnchor.x;
+            const offsetYHand = p.homeJoints.hand.y - p.homeAnchor.y;
+
+            const tempJoints = {
+                [p.sideKey]: {
+                    elbow: { x: anchor.x + offsetXElbow, y: anchor.y + offsetYElbow },
+                    hand: { x: anchor.x + offsetXHand, y: anchor.y + offsetYHand }
+                }
+            };
+
+            // Usamos una versión modificada de _drawPincers
+            this._drawPincers(0, 0, 0, anchor, tempJoints);
+        });
+
+        // Dibujar cuerpo y cola desarmados
+        const tempSpinePoints = this.deconstructedParts
+            .filter(p => p.type === 'spine')
+            .sort((a, b) => a.index - b.index) // Asegurar el orden
+            .map(p => {
+                const from = this.isReconstructing ? p.targetPos : p.homePos;
+                const to = this.isReconstructing ? p.homePos : p.targetPos;
+                return {
+                    x: from.x + (to.x - from.x) * t,
+                    y: from.y + (to.y - from.y) * t
+                };
+            });
+
+        this.ctx.fillStyle = '#000';
+        const bodyEndIndex = tempSpinePoints.length - 2;
+        for (let i = bodyEndIndex; i > 1; i--) {
+            // Reutilizamos la lógica de _drawScorpion para las placas del cuerpo
+            const p1 = tempSpinePoints[i];
+            const p2 = tempSpinePoints[i - 1];
+            const time = i / tempSpinePoints.length;
+            const width1 = Math.max(1.5, (3.0 - Math.pow(time, 0.6) * 4.0) * 4.5);
+            const width2 = Math.max(1.5, (3.0 - Math.pow((i - 1) / tempSpinePoints.length, 0.6) * 4.0) * 4.5);
+            if (width1 < 0.5) continue;
+            const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x) + Math.PI / 2;
+            const angle2 = Math.atan2(p1.y - tempSpinePoints[i-2].y, p1.x - tempSpinePoints[i-2].x) + Math.PI / 2;
+            const p1_left = { x: p1.x + width1 * Math.cos(angle1), y: p1.y + width1 * Math.sin(angle1) };
+            const p1_right = { x: p1.x - width1 * Math.cos(angle1), y: p1.y - width1 * Math.sin(angle1) };
+            const p2_left = { x: p2.x + width2 * Math.cos(angle2), y: p2.y + width2 * Math.sin(angle2) };
+            const p2_right = { x: p2.x - width2 * Math.cos(angle2), y: p2.y - width2 * Math.sin(angle2) };
+            this.ctx.beginPath();
+            this.ctx.moveTo(p1_left.x, p1_left.y); this.ctx.lineTo(p2_left.x, p2_left.y);
+            this.ctx.lineTo(p2_right.x, p2_right.y); this.ctx.lineTo(p1_right.x, p1_right.y);
+            this.ctx.closePath();
+            this.ctx.fill(); this.ctx.stroke();
+        }
+
+        const tailTip = tempSpinePoints[tempSpinePoints.length - 1];
+        const preTip = tempSpinePoints[tempSpinePoints.length - 2];
+        this._drawStinger(tailTip.x, tailTip.y, Math.atan2(tailTip.y - preTip.y, tailTip.x - preTip.x));
+        this._drawHead(tempSpinePoints[0].x, tempSpinePoints[0].y, Math.atan2(tempSpinePoints[0].y - tempSpinePoints[1].y, tempSpinePoints[0].x - tempSpinePoints[1].x) + Math.PI, this.config.head.size);
     }
 
     _drawScorpion() {
         const bodyColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
         const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
 
+        this._drawShadow();
+
         this.ctx.strokeStyle = bodyColor;
         this.ctx.lineWidth = 1.2;
         this.ctx.shadowColor = glowColor;
-        this.ctx.shadowBlur = this.config.color.glowBlur + Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount + this.postStrikeGlow;
+        
+        // Brillo dinámico basado en el movimiento
+        const speedGlow = Math.min(this.headSpeed * 0.5, 2);
+        this.ctx.shadowBlur = this.config.color.glowBlur + 
+                              Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount + 
+                              this.postStrikeGlow +
+                              speedGlow;
 
         this.legs.forEach(leg => {
             const bodyPoint = this.spinePoints[leg.spineIndex];
-            leg.draw(this.ctx, bodyPoint);
+            leg.draw(this.ctx, bodyPoint, this.currentHue, this.config.color);
+        });
+
+        // Dibujar las articulaciones de las pinzas con brillo
+        this._drawPincerJoints();
+
+        // Volvemos a dibujar las patas para que las articulaciones del cuerpo queden por encima
+        // pero las articulaciones de las pinzas por debajo.
+        this.ctx.shadowBlur = 0; // Sin brillo para esta pasada
+        this.legs.forEach(leg => {
+            const bodyPoint = this.spinePoints[leg.spineIndex];
+            leg.draw(this.ctx, bodyPoint, this.currentHue, this.config.color);
         });
 
         // --- NUEVA LÓGICA PARA DIBUJAR CUERPO SEGMENTADO ---
         this.ctx.fillStyle = '#000';
+        // Restaurar el brillo para el cuerpo
+        this.ctx.shadowBlur = this.config.color.glowBlur + 
+                              Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount + 
+                              this.postStrikeGlow +
+                              speedGlow;
+
+
         // Modificado para recorrer toda la cola, hasta el penúltimo segmento.
         const bodyEndIndex = this.spinePoints.length - 2;
 
@@ -732,6 +984,24 @@ class Scorpion {
     _drawParticles() {
         this.ctx.save();
         this.particles.forEach(p => p.draw(this.ctx));
+        this.ctx.restore();
+    }
+
+    _drawShadow() {
+        this.ctx.save();
+        const shadowCenter = this.spinePoints[8];
+        if (!shadowCenter) return;
+
+        const gradient = this.ctx.createRadialGradient(shadowCenter.x, shadowCenter.y + 10, 5, shadowCenter.x, shadowCenter.y + 10, 80);
+        const shadowColor = `hsla(${this.currentHue}, 90%, 10%, 0.4)`;
+        gradient.addColorStop(0, shadowColor);
+        gradient.addColorStop(1, 'transparent');
+
+        this.ctx.fillStyle = gradient;
+        this.ctx.beginPath();
+        this.ctx.ellipse(shadowCenter.x, shadowCenter.y + 10, 90, 40, this.headAngle, 0, Math.PI * 2);
+        this.ctx.fill();
+
         this.ctx.restore();
     }
 
@@ -799,16 +1069,42 @@ class Scorpion {
         this.ctx.restore();
     }
 
-    _drawPincers(headX, headY, headAngle) {
+    _drawPincerJoints() {
+        this.ctx.save();
+        const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
+        this.ctx.fillStyle = glowColor;
+        this.ctx.shadowColor = glowColor;
+        this.ctx.shadowBlur = 8;
+
+        for (let side = -1; side <= 1; side += 2) {
+            const sideKey = side === -1 ? 'left' : 'right';
+            const joints = this.pincerJoints[sideKey];
+            if (!joints) continue;
+
+            // Articulación del "hombro"
+            const anchorPoint = this.spinePoints[1];
+            this.ctx.beginPath();
+            this.ctx.arc(anchorPoint.x, anchorPoint.y, 2.5, 0, Math.PI * 2);
+            this.ctx.fill();
+
+            // Articulación del "codo"
+            this.ctx.beginPath();
+            this.ctx.arc(joints.elbow.x, joints.elbow.y, 2, 0, Math.PI * 2);
+            this.ctx.fill();
+        }
+        this.ctx.restore();
+    }
+
+    _drawPincers(headX, headY, headAngle, overrideAnchor, overrideJoints) {
         this.ctx.save();
         
         for (let side = -1; side <= 1; side += 2) {
             const sideKey = side === -1 ? 'left' : 'right';
-            const joints = this.pincerJoints[sideKey];
+            const joints = overrideJoints ? overrideJoints[sideKey] : this.pincerJoints[sideKey];
             if (!joints) continue; // Si aún no se ha inicializado, saltar
 
             // 1. Usar las posiciones pre-calculadas
-            const anchorPoint = this.spinePoints[1];
+            const anchorPoint = overrideAnchor || this.spinePoints[1];
             const armBaseX = anchorPoint.x;
             const armBaseY = anchorPoint.y;
             const elbowX = joints.elbow.x;
@@ -866,6 +1162,16 @@ class Scorpion {
             this.ctx.moveTo(handX, handY); this.ctx.quadraticCurveTo(fixedClawControlX, fixedClawControlY, fixedClawEndX, fixedClawEndY);
             this.ctx.lineWidth = 4.5;
             this.ctx.stroke();
+
+            // Resaltar la articulación de la mano
+            this.ctx.save();
+            const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
+            this.ctx.fillStyle = glowColor;
+            this.ctx.beginPath();
+            this.ctx.arc(handX, handY, 2.5, 0, Math.PI * 2);
+            this.ctx.fill();
+            this.ctx.restore();
+
         }
         this.ctx.restore();
     }
@@ -975,6 +1281,8 @@ function setup() {
 
     canvas.addEventListener('mouseup', handleRelease);
     canvas.addEventListener('touchend', handleRelease, { passive: false }); // Suelta o ataca
+
+    document.getElementById('deconstructBtn').addEventListener('click', () => scorpion.toggleDeconstruction());
 
     loop();
 }

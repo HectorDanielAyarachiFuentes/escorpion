@@ -43,3 +43,21 @@ canvas {
     font-size: 14px;
     pointer-events: none; /* Asegura que el texto no interfiera con los eventos del canvas */
 }
+
+/* Estilos para el nuevo botón de desarmar */
+#deconstructBtn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    padding: 8px 16px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+#deconstructBtn:hover {
+    background-color: rgba(255, 255, 255, 0.2);
+}
