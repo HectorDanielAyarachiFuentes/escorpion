@@ -365,6 +365,7 @@ class Scorpion {
         this.postStrikeGlow = 0;
         this.eyeGlow = 0;
         this.pincerAngle = this.config.pincers.openAngle;
+        this.pincerJoints = {}; // Para la nueva física de pinzas
 
         this.particles = [];
         this._initLegs();
@@ -438,6 +439,7 @@ class Scorpion {
         this._updateStrike();
         this._updateParticles();
         this._updateLegs();
+        this._updatePincerPhysics(); // Nueva llamada
         this._updatePincers();
         this._updateEyes();
     }
@@ -629,6 +631,34 @@ class Scorpion {
         this.pincerAngle += (targetAngle - this.pincerAngle) * this.config.pincers.snapLerpFactor;
     }
 
+    _updatePincerPhysics() {
+        const lerpFactor = 0.2; // Controla la suavidad/retraso del brazo
+
+        for (let side = -1; side <= 1; side += 2) {
+            const sideKey = side === -1 ? 'left' : 'right';
+            if (!this.pincerJoints[sideKey]) {
+                this.pincerJoints[sideKey] = { elbow: {x: 0, y: 0}, hand: {x: 0, y: 0} };
+            }
+
+            const anchorPoint = this.spinePoints[1];
+
+            // Calcular posiciones objetivo
+            const targetAngleA = this.headAngle + side * 1.2;
+            const targetElbowX = anchorPoint.x + this.config.pincers.lengthA * Math.cos(targetAngleA);
+            const targetElbowY = anchorPoint.y + this.config.pincers.lengthA * Math.sin(targetAngleA);
+
+            const targetAngleB = this.headAngle + side * 0.5;
+            const targetHandX = targetElbowX + this.config.pincers.lengthB * Math.cos(targetAngleB);
+            const targetHandY = targetElbowY + this.config.pincers.lengthB * Math.sin(targetAngleB);
+
+            // Interpolar suavemente hacia el objetivo
+            this.pincerJoints[sideKey].elbow.x += (targetElbowX - this.pincerJoints[sideKey].elbow.x) * lerpFactor;
+            this.pincerJoints[sideKey].elbow.y += (targetElbowY - this.pincerJoints[sideKey].elbow.y) * lerpFactor;
+            this.pincerJoints[sideKey].hand.x += (targetHandX - this.pincerJoints[sideKey].hand.x) * lerpFactor;
+            this.pincerJoints[sideKey].hand.y += (targetHandY - this.pincerJoints[sideKey].hand.y) * lerpFactor;
+        }
+    }
+
     // --- Métodos de Dibujo ---
     draw() {
         const width = this.canvas.width / this.dpr;
@@ -773,21 +803,18 @@ class Scorpion {
         this.ctx.save();
         
         for (let side = -1; side <= 1; side += 2) {
-            // 1. Anclaje en los "hombros" (primer segmento del cuerpo), no en la cabeza.
+            const sideKey = side === -1 ? 'left' : 'right';
+            const joints = this.pincerJoints[sideKey];
+            if (!joints) continue; // Si aún no se ha inicializado, saltar
+
+            // 1. Usar las posiciones pre-calculadas
             const anchorPoint = this.spinePoints[1];
-            const anchorAngle = Math.atan2(this.spinePoints[2].y - anchorPoint.y, this.spinePoints[2].x - anchorPoint.x);
             const armBaseX = anchorPoint.x;
             const armBaseY = anchorPoint.y;
-
-            // 2. Calcular la posición del "codo" (articulación).
-            const angleA = headAngle + side * 1.2;
-            const elbowX = armBaseX + this.config.pincers.lengthA * Math.cos(angleA);
-            const elbowY = armBaseY + this.config.pincers.lengthA * Math.sin(angleA);
-
-            // 3. Calcular la posición de la "mano".
-            const angleB = headAngle + side * 0.5;
-            const handX = elbowX + this.config.pincers.lengthB * Math.cos(angleB);
-            const handY = elbowY + this.config.pincers.lengthB * Math.sin(angleB);
+            const elbowX = joints.elbow.x;
+            const elbowY = joints.elbow.y;
+            const handX = joints.hand.x;
+            const handY = joints.hand.y;
 
             // Dibujar el primer segmento del brazo
             this.ctx.lineWidth = this.config.pincers.armWidth * 0.8;
