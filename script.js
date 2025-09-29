@@ -1,123 +1,7 @@
+import { config } from './config.js';
+
 const canvas = document.getElementById('scorpionCanvas');
 const ctx = canvas.getContext('2d');
-
-// --- Configuración ---
-const config = {
-    numSpinePoints: 120, // AUMENTADO para una cola más larga y flexible
-    segmentLength: 3.5,  // REDUCIDO para compensar el aumento de puntos
-    maxSpeed: 5.5,
-    physicsIterations: 5,
-    // --- Nuevas configuraciones centralizadas ---
-    head: {
-        size: 5.5,
-        widthFactor: 6.0,
-        lengthFactor: 3.0,
-        // --- Configuración de los ojos ---
-        eyes: {
-            offsetY: 1.2,       // Distancia del centro a los lados
-            offsetX: 1.8,       // Distancia del centro hacia adelante
-            size: 1.5,          // Tamaño de los ojos
-            glowDistance: 120,  // Distancia a la que el cursor activa el brillo
-            glowLerpFactor: 0.08 // Velocidad con la que aparece/desaparece el brillo
-        }
-    },
-    legs: {
-        indices: [2, 4, 6, 8, 10, 12, 14, 16], // 8 pares de patas = 16 patas en total
-        angles: [1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8], // Ángulos distintos para cada par de patas
-        naturalLength: 50,
-        legWidth: 4.5, // Grosor base de la pata
-        segment1: 30,
-        segment2: 25,
-        segment3: 15, 
-        stepThreshold: 30, // Pasos más largos y deliberados (REDUCIDO para más reactividad)
-        stepDuration: 18,  // Pasos más rápidos y firmes
-        stepLift: 15,
-        stepPredictionFrames: 12,      // Cuántos frames hacia el futuro predecir el paso.
-        maxPredictionDistance: 50, // Límite a la distancia de predicción para evitar pasos erráticos.
-    },
-    movement: {
-        walkSpeed: 1.2, // Ligeramente más lento para que coincida con los pasos
-        grabRadius: 20, 
-        spineDrag: 0.9, 
-        slowdownRadius: 60, 
-        turnSway: 0.4, // AUMENTADO para un contoneo más pronunciado al girar
-    },
-    strike: {
-        duration: 25,
-        angleOffset: -1.5,
-    },
-    tail: {
-        stingerLength: 22,
-        idleWiggleSpeed: 0.05,
-        idleWiggleAmount: 0.15,
-        curl: 8.0, // Factor de altura de la curva de la cola (AUMENTADO AÚN MÁS)
-        curlStartSegment: 15, // Segmento donde empieza a curvarse (REDUCIDO)
-        // --- Nuevos parámetros para movimiento orgánico ---
-        speedCurlFactor: 1.5, // Cuánto se estira la cola al moverse rápido
-        wagAmount: 1.2,       // Amplitud del balanceo lateral de la cola al moverse
-        wagSpeed: 0.2,        // Velocidad del balanceo lateral
-        undulationAmount: 2.0, // Amplitud de la ondulación del cuerpo
-        undulationSpeed: 0.2,  // Velocidad de la ondulación del cuerpo
-        whipAmount: 2.0,       // Amplitud del "latigazo" vertical de la cola al moverse
-    },
-    // --- NUEVA CONFIGURACIÓN PARA SEGMENTACIÓN DEL CUERPO ---
-    body: {
-        thoraxEndIndex: 18, // Índice del segmento de la espina dorsal donde termina el tórax
-        abdomenRingScale: 6.5, // Factor de tamaño para los anillos de la cola
-    },
-    pincers: {
-        openAngle: 0.6,     // Ángulo de apertura de la pinza
-        closedAngle: 0.05,  // Ángulo de cierre
-        lengthA: 25,        // Longitud del primer segmento del brazo (hombro a codo)
-        lengthB: 25,        // Longitud del segundo segmento del brazo (codo a mano)
-        lengthFinger: 38,   // Longitud de los dedos (AUMENTADO)
-        armWidth: 12,       // Grosor del brazo
-        handWidth: 22,      // "Mano" mucho más ancha y bulbosa (AUMENTADO)
-        snapDistance: 80,   // Distancia a la que reaccionan al cursor
-        snapLerpFactor: 0.1, // Velocidad con la que se cierran/abren
-    },
-    // --- Configuración de partículas ---
-    particles: {
-        count: 40,          // Más partículas para un rocío más denso
-        minLife: 25,
-        maxLife: 50,
-        minSpeed: 3,
-        maxSpeed: 7,
-        sprayAngle: 0.8,    // Ángulo del cono del rocío (en radianes)
-        drag: 0.96,         // Resistencia del aire para que se frene
-    },
-    // --- Configuración de color dinámico ---
-    color: {
-        initialHue: 200,    
-        saturation: 90,     
-        lightness: 80,      
-        glowLightness: 50,  
-        hueChangeSpeed: 0.1, 
-        glowBlur: 8,       // Brillo base (REDUCIDO)
-        glowPulseSpeed: 0.08, // Velocidad del pulso de brillo
-        glowPulseAmount: 3,   // Amplitud del pulso (REDUCIDO)
-        postStrikeGlowBoost: 10, // Aumento de brillo extra tras atacar (REDUCIDO)
-        postStrikeGlowDecay: 0.95 // Velocidad a la que se desvanece el brillo extra
-    }
-    ,
-    // --- Nueva configuración para el destello de las pinzas ---
-    pincerFlash: {
-        count: 5,
-        minLife: 10, maxLife: 20, minSpeed: 1, maxSpeed: 2.5,
-        sprayAngle: Math.PI * 2, drag: 0.94
-    }
-    ,
-    // --- Nueva configuración para el polvo de las patas ---
-    dust: {
-        count: 4,           // Pocas partículas para un efecto sutil
-        minLife: 15,
-        maxLife: 30,
-        minSpeed: 0.5,
-        maxSpeed: 1.2,
-        sprayAngle: Math.PI, // Amplio ángulo de dispersión hacia arriba
-        drag: 0.92,          // Se frenan rápidamente
-    }
-};
 
 // =====================================================================
 // ===               REFACTORIZACIÓN A CLASES (NUEVO)                ===
@@ -132,6 +16,7 @@ class Particle {
         this.y = y;
         this.vx = Math.cos(sprayAngle) * speed;
         this.vy = Math.sin(sprayAngle) * speed;
+        this.gravity = config.gravity || 0.08; // Usar gravedad de config o un valor por defecto
         this.life = config.minLife + Math.random() * (config.maxLife - config.minLife);
         this.maxLife = config.maxLife;
         this.drag = config.drag;
@@ -143,7 +28,7 @@ class Particle {
     update() {
         this.x += this.vx;
         this.y += this.vy;
-        this.vy += 0.08; // Gravedad
+        this.vy += this.gravity; // Gravedad
         this.vx *= this.drag;
         this.vy *= this.drag;
         this.life--;
@@ -201,13 +86,14 @@ class Leg {
             this.stepProgress++;
             let t = this.stepProgress / this.currentStepDuration;
 
+            const DUST_CREATION_THRESHOLD = 0.9;
             // Justo antes de que la pata aterrice (t > 0.9), crea el polvo
-            if (t > 0.9 && !this.dustCreated) {
+            if (t > DUST_CREATION_THRESHOLD && !this.dustCreated) {
                 onStepCallback(this.stepTargetPos.x, this.stepTargetPos.y);
                 this.dustCreated = true;
             }
 
-            t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // Ease in-out
+            t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // Fórmula de interpolación Ease in-out
 
             this.footPos.x = this.stepStartPos.x + (this.stepTargetPos.x - this.stepStartPos.x) * t;
             this.footPos.y = this.stepStartPos.y + (this.stepTargetPos.y - this.stepStartPos.y) * t;
@@ -257,10 +143,11 @@ class Leg {
             lift = Math.sin(this.stepProgress / this.currentStepDuration * Math.PI) * this.config.stepLift;
         }
 
-        if (lift > 0.1) {
+        const FOOT_SHADOW_LIFT_THRESHOLD = 0.1;
+        if (lift > FOOT_SHADOW_LIFT_THRESHOLD) {
             ctx.beginPath();
-            ctx.arc(footX, footY, 1.5, 0, Math.PI * 2); 
-            ctx.fillStyle = 'rgba(0,0,0,0.4)';
+            ctx.arc(footX, footY, 1.5, 0, Math.PI * 2); // Sombra del pie
+            ctx.fillStyle = 'rgba(0,0,0,0.4)'; // Color de la sombra
             ctx.fill();
         }
         footY -= lift;
@@ -268,17 +155,24 @@ class Leg {
         const seg1_len = this.config.segment1;
         const seg2_len = this.config.segment2 + this.config.segment3;
         const dist = Math.hypot(startX - footX, startY - footY);
-        const maxReach = seg1_len + seg2_len - 1; // Evita que la pata se estire completamente
+        const MAX_REACH_OFFSET = 1; // Evita que la pata se estire completamente y cause "popping"
+        const maxReach = seg1_len + seg2_len - MAX_REACH_OFFSET;
         let jointX, jointY;
 
+        // --- Lógica de Cinemática Inversa (IK) para la rodilla ---
+        // Si la distancia al pie es mayor que el alcance máximo, la pata se estira completamente.
         if (dist >= maxReach) {
             const angle = Math.atan2(footY - startY, footX - startX);
             jointX = startX + seg1_len * Math.cos(angle);
             jointY = startY + seg1_len * Math.sin(angle);
         } else {
+            // Si el pie está al alcance, se calcula la posición de la rodilla usando la ley de los cosenos
+            // para formar un triángulo entre el cuerpo, la rodilla y el pie.
             const angle_at_body = Math.acos((seg1_len**2 + dist**2 - seg2_len**2) / (2 * seg1_len * dist));
             const angle_body_to_foot = Math.atan2(footY - startY, footX - startX);
+            // El ángulo de la articulación se ajusta por `this.side` para que las rodillas apunten hacia afuera.
             const jointAngle = angle_body_to_foot + (angle_at_body * this.side);
+
             jointX = startX + seg1_len * Math.cos(jointAngle);
             jointY = startY + seg1_len * Math.sin(jointAngle);
         }
@@ -455,11 +349,12 @@ class Scorpion {
     _captureDeconstructionState() {
         this.deconstructedParts = [];
         const center = { x: this.canvas.width / (2 * this.dpr), y: this.canvas.height / (2 * this.dpr) };
+        const deconfig = this.config.deconstruction;
 
         // Capturar segmentos del cuerpo
         this.spinePoints.forEach((p, i) => {
             const angle = Math.random() * Math.PI * 2;
-            const dist = 150 + Math.random() * 150;
+            const dist = deconfig.spinePart.minDist + Math.random() * deconfig.spinePart.randDist;
             this.deconstructedParts.push({
                 type: 'spine',
                 index: i,
@@ -471,7 +366,7 @@ class Scorpion {
         // Capturar patas
         this.legs.forEach((leg, i) => {
             const angle = Math.random() * Math.PI * 2;
-            const dist = 200 + Math.random() * 200;
+            const dist = deconfig.legPart.minDist + Math.random() * deconfig.legPart.randDist;
             this.deconstructedParts.push({
                 type: 'leg',
                 index: i,
@@ -485,7 +380,7 @@ class Scorpion {
         Object.keys(this.pincerJoints).forEach(sideKey => {
             const joints = this.pincerJoints[sideKey];
             const angle = Math.random() * Math.PI * 2;
-            const dist = 180 + Math.random() * 180;
+            const dist = deconfig.pincerPart.minDist + Math.random() * deconfig.pincerPart.randDist;
             this.deconstructedParts.push({
                 type: 'pincer',
                 sideKey: sideKey,
@@ -521,8 +416,8 @@ class Scorpion {
     }
 
     _updateDeconstruction() {
-        const duration = 120; // frames
-        this.deconstructionProgress += 1 / duration;
+        const DECONSTRUCTION_DURATION_FRAMES = this.config.deconstruction.durationFrames; // ¡Mucho más claro!
+        this.deconstructionProgress += 1 / DECONSTRUCTION_DURATION_FRAMES;
 
         if (this.deconstructionProgress >= 1) {
             this.deconstructionProgress = 1;
@@ -641,11 +536,12 @@ class Scorpion {
             // 2. Propagamos la posición desde la cabeza hacia la cola para mantener la distancia (restricción de cuerda)
             for (let i = 1; i < this.spinePoints.length; i++) {
                 const currentPoint = this.spinePoints[i];
-                const prevPoint = this.spinePoints[i-1];
+                const prevPoint = this.spinePoints[i - 1];
 
                 const dx = currentPoint.x - prevPoint.x;
                 const dy = currentPoint.y - prevPoint.y;
                 const distSq = dx * dx + dy * dy;
+                // Usar el cuadrado de la longitud del segmento para evitar una raíz cuadrada.
                 const segmentLengthSq = this.config.segmentLength * this.config.segmentLength;
 
                 // --- OPTIMIZACIÓN CRÍTICA: Evitar raíz cuadrada (Math.hypot/Math.sqrt) en el bucle de física ---
@@ -654,6 +550,8 @@ class Scorpion {
                     const diff = (distSq - segmentLengthSq) / (distSq * 2); // Aproximación de (dist - L) / dist
                     currentPoint.x -= dx * diff;
                     currentPoint.y -= dy * diff;
+                    // Esto empuja el punto actual hacia el punto anterior para corregir la distancia,
+                    // creando un efecto de "cuerda" o "cadena".
                 }
             }
         }
@@ -726,8 +624,8 @@ class Scorpion {
     }
 
     _updatePincers() {
-        const head = this.spinePoints[0];
-        const distToMouse = Math.hypot(this.mouse.x - head.x, this.mouse.y - head.y);
+        const head = this.spinePoints[0]; // La cabeza es el punto de referencia
+        const distToMouse = Math.hypot(this.mouse.x - head.x, this.mouse.y - head.y); // Distancia del cursor a la cabeza
         const isClosing = (distToMouse < this.config.pincers.snapDistance && !this.isGrabbed);
         let targetAngle = isClosing ? this.config.pincers.closedAngle : this.config.pincers.openAngle;
 
@@ -738,6 +636,7 @@ class Scorpion {
             }
         }
 
+        // Interpolar suavemente hacia el ángulo objetivo
         this.pincerAngle += (targetAngle - this.pincerAngle) * this.config.pincers.snapLerpFactor;
         this.lastPincerAngle = this.pincerAngle;
     }
@@ -745,7 +644,7 @@ class Scorpion {
     _updatePincerPhysics() {
         // --- OPTIMIZACIÓN: No calcular la física de las pinzas si el escorpión está siendo arrastrado ---
         if (!this.isGrabbed) {
-            const lerpFactor = 0.2; 
+            const PINCER_FOLLOW_LERP_FACTOR = 0.2; 
     
             for (let side = -1; side <= 1; side += 2) {
                 const sideKey = side === -1 ? 'left' : 'right';
@@ -769,10 +668,10 @@ class Scorpion {
                 const targetHandX = targetElbowX + this.config.pincers.lengthB * Math.cos(targetAngleB);
                 const targetHandY = targetElbowY + this.config.pincers.lengthB * Math.sin(targetAngleB);
     
-                this.pincerJoints[sideKey].elbow.x += (targetElbowX - this.pincerJoints[sideKey].elbow.x) * lerpFactor;
-                this.pincerJoints[sideKey].elbow.y += (targetElbowY - this.pincerJoints[sideKey].elbow.y) * lerpFactor;
-                this.pincerJoints[sideKey].hand.x += (targetHandX - this.pincerJoints[sideKey].hand.x) * lerpFactor;
-                this.pincerJoints[sideKey].hand.y += (targetHandY - this.pincerJoints[sideKey].hand.y) * lerpFactor;
+                this.pincerJoints[sideKey].elbow.x += (targetElbowX - this.pincerJoints[sideKey].elbow.x) * PINCER_FOLLOW_LERP_FACTOR;
+                this.pincerJoints[sideKey].elbow.y += (targetElbowY - this.pincerJoints[sideKey].elbow.y) * PINCER_FOLLOW_LERP_FACTOR;
+                this.pincerJoints[sideKey].hand.x += (targetHandX - this.pincerJoints[sideKey].hand.x) * PINCER_FOLLOW_LERP_FACTOR;
+                this.pincerJoints[sideKey].hand.y += (targetHandY - this.pincerJoints[sideKey].hand.y) * PINCER_FOLLOW_LERP_FACTOR;
             }
         }
     }
@@ -809,7 +708,7 @@ class Scorpion {
 
     _drawDeconstructed() {
         let t = this.deconstructionProgress;
-        t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // Ease in-out
+        t = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // Fórmula de interpolación Ease in-out
 
         const bodyColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
         const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
