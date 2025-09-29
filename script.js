@@ -231,6 +231,7 @@ class Scorpion {
         this.config = config;
         this.dpr = window.devicePixelRatio || 1;
         this.animationFrame = 0;
+        this.state = 'IDLE'; // Initial state: IDLE
         this.init();
     }
 
@@ -252,25 +253,15 @@ class Scorpion {
         this.headAngularVelocity = 0;
         this.headAngle = 0;
         this.lastHeadAngle = 0;
-
-        this.isStriking = false;
         this.strikeProgress = 0;
         this.strikeTarget = { x: 0, y: 0 };
-
-        this.isGrabbed = false;
         this.grabbedPointIndex = -1;
-
         this.currentHue = this.config.color.initialHue;
         this.postStrikeGlow = 0;
         this.eyeGlow = 0;
         this.pincerAngle = this.config.pincers.openAngle;
         this.lastPincerAngle = this.config.pincers.openAngle;
         this.pincerJoints = {}; // Para la nueva física de pinzas
-
-        // --- Estados para la descomposición ---
-        this.isDeconstructed = false;
-        this.isDeconstructing = false;
-        this.isReconstructing = false;
         this.deconstructionProgress = 0;
         this.deconstructedParts = [];
 
@@ -303,31 +294,34 @@ class Scorpion {
     }
 
     startStrike() {
-        if (!this.isStriking && !this.isGrabbed) {
-            this.isStriking = true;
+        // Only allow strike if not already striking, grabbed, or deconstructing
+        if (this.state === 'IDLE' || this.state === 'WALKING') {
+            this.state = 'STRIKING';
             this.strikeProgress = 0;
             this.strikeTarget.x = this.mouse.x;
             this.strikeTarget.y = this.mouse.y;
         }
     }
 
-    startGrab() {
-        if (this.isGrabbed) return;
+    startGrab() { // Can grab from IDLE, WALKING, or STRIKING
+        if (this.state === 'DECONSTRUCTING' || this.state === 'DECONSTRUCTED' || this.state === 'RECONSTRUCTING') return;
+        if (this.state === 'GRABBED') return; // Already grabbed
+
         for (let i = 0; i < this.spinePoints.length; i++) {
             const p = this.spinePoints[i];
             const dist = Math.hypot(this.mouse.x - p.x, this.mouse.y - p.y);
             if (dist < this.config.movement.grabRadius) {
-                this.isGrabbed = true;
+                this.state = 'GRABBED';
                 this.grabbedPointIndex = i;
                 this.canvas.style.cursor = 'grabbing';
                 break;
             }
         }
     }
-
+    
     endGrab() {
-        if (this.isGrabbed) {
-            this.isGrabbed = false;
+        if (this.state === 'GRABBED') {
+            this.state = (this.headSpeed > 0.1) ? 'WALKING' : 'IDLE'; // Return to walking or idle
             this.grabbedPointIndex = -1;
             this.canvas.style.cursor = 'pointer';
         }
@@ -335,14 +329,14 @@ class Scorpion {
 
     toggleDeconstruction() {
         if (this.isDeconstructing || this.isReconstructing) return;
-
-        if (this.isDeconstructed) {
-            this.isReconstructing = true;
+        
+        if (this.state === 'DECONSTRUCTED') {
+            this.state = 'RECONSTRUCTING';
             this.deconstructionProgress = 0;
         } else {
-            this.isDeconstructing = true;
+            this.state = 'DECONSTRUCTING';
             this.deconstructionProgress = 0;
-            this._captureDeconstructionState();
+            this._captureDeconstructionState(); // Capture state before deconstructing
         }
     }
 
@@ -396,23 +390,53 @@ class Scorpion {
         this.animationFrame++;
         this.currentHue = (this.currentHue + this.config.color.hueChangeSpeed) % 360;
 
-        if (this.postStrikeGlow > 0.1) {
+        if (this.postStrikeGlow > 0.01) { // Check for a small threshold
             this.postStrikeGlow *= this.config.color.postStrikeGlowDecay;
         }
 
-        if (this.isDeconstructing || this.isReconstructing) {
-            this._updateDeconstruction();
-            return; // Pausar la física normal durante la animación
-        }
-
-        this._updateMovement();
-        this._updateSpinePhysics();
-        this._updateStrike();
         this._updateParticles();
-        this._updateLegs();
-        this._updatePincerPhysics(); // Nueva llamada
-        this._updatePincers();
         this._updateEyes();
+
+        switch (this.state) {
+            case 'IDLE':
+                this._updateMovement(); // Check for movement to transition to WALKING
+                this._updateSpinePhysics();
+                this._updateLegs();
+                this._updatePincerPhysics();
+                this._updatePincers();
+                if (this.headSpeed > 0.1) this.state = 'WALKING';
+                break;
+            case 'WALKING':
+                this._updateMovement();
+                this._updateSpinePhysics();
+                this._updateLegs();
+                this._updatePincerPhysics();
+                this._updatePincers();
+                if (this.headSpeed < 0.1) this.state = 'IDLE';
+                break;
+            case 'STRIKING':
+                this._updateMovement(); // Still moves while striking
+                this._updateSpinePhysics();
+                this._updateLegs();
+                this._updatePincerPhysics();
+                this._updatePincers();
+                this._updateStrike(); // This will transition out of STRIKING
+                break;
+            case 'GRABBED':
+                this._updateMovement(); // Mouse directly controls grabbed point
+                this._updateSpinePhysics();
+                this._updateLegs();
+                this._updatePincerPhysics();
+                this._updatePincers();
+                break;
+            case 'DECONSTRUCTING':
+            case 'RECONSTRUCTING':
+                this._updateDeconstruction(); // This will transition out of DECONSTRUCTING/RECONSTRUCTING
+                break;
+            case 'DECONSTRUCTED':
+                // Do nothing, just wait for reconstruction
+                break;
+        }
     }
 
     _updateDeconstruction() {
@@ -421,13 +445,10 @@ class Scorpion {
 
         if (this.deconstructionProgress >= 1) {
             this.deconstructionProgress = 1;
-            if (this.isDeconstructing) {
-                this.isDeconstructing = false;
-                this.isDeconstructed = true;
-            }
-            if (this.isReconstructing) {
-                this.isReconstructing = false;
-                this.isDeconstructed = false;
+            if (this.state === 'DECONSTRUCTING') {
+                this.state = 'DECONSTRUCTED';
+            } else if (this.state === 'RECONSTRUCTING') {
+                this.state = 'IDLE'; // Back to normal
                 this.deconstructedParts = []; // Limpiar estado
             }
         }
@@ -438,7 +459,7 @@ class Scorpion {
         const oldHeadX = head.x;
         const oldHeadY = head.y;
 
-        if (this.isGrabbed && this.grabbedPointIndex !== -1) {
+        if (this.state === 'GRABBED' && this.grabbedPointIndex !== -1) {
             const grabbedPoint = this.spinePoints[this.grabbedPointIndex];
             grabbedPoint.x = this.mouse.x;
             grabbedPoint.y = this.mouse.y; 
@@ -514,7 +535,7 @@ class Scorpion {
         // Luego, ejecutamos el bucle de física para mantener la estructura
         for (let j = 0; j < this.config.physicsIterations; j++) {
             if (this.isGrabbed && this.grabbedPointIndex !== -1) {
-                this.spinePoints[this.grabbedPointIndex].x = this.mouse.x;
+                this.spinePoints[this.grabbedPointIndex].x = this.mouse.x; // This is handled by _updateMovement now
                 this.spinePoints[this.grabbedPointIndex].y = this.mouse.y;
             }
 
@@ -566,18 +587,18 @@ class Scorpion {
         this.legs.forEach((leg) => {
             const bodyPoint = this.spinePoints[leg.spineIndex];
             const bodyAngle = Math.atan2(this.spinePoints[leg.spineIndex + 1].y - bodyPoint.y, this.spinePoints[leg.spineIndex + 1].x - bodyPoint.x);
-            const canStep = steppingLegsInGroup[leg.gaitGroup] === 0;                    
-            leg.update(bodyPoint, bodyAngle, this.headVelocity, this.headAngularVelocity, this.headSpeed, canStep, this.isGrabbed, this._createDustPuff.bind(this));
+            const canStep = steppingLegsInGroup[leg.gaitGroup] === 0;
+            leg.update(bodyPoint, bodyAngle, this.headVelocity, this.headAngularVelocity, this.headSpeed, canStep, this.state === 'GRABBED', this._createDustPuff.bind(this));
         });
     }
 
     _updateStrike() {
-        if (this.isStriking) {
+        if (this.state === 'STRIKING') {
             if (this.strikeProgress === Math.floor(this.config.strike.duration / 2)) {
                 const tailSegmentIndex = this.spinePoints.length - 2;
                 const p1 = this.spinePoints[tailSegmentIndex];
                 const p2 = this.spinePoints[tailSegmentIndex + 1];
-                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+                const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x); // Angle of the tail segment
                 
                 const strikePhase = this.strikeProgress / this.config.strike.duration;
                 const strikeAngleOffset = Math.sin(strikePhase * Math.PI) * this.config.strike.angleOffset;
@@ -590,7 +611,7 @@ class Scorpion {
 
             this.strikeProgress++;
             if (this.strikeProgress >= this.config.strike.duration) {
-                this.isStriking = false;
+                this.state = (this.headSpeed > 0.1) ? 'WALKING' : 'IDLE'; // Return to walking or idle
                 this.strikeProgress = 0;
                 this.postStrikeGlow = this.config.color.postStrikeGlowBoost;
             }
@@ -619,14 +640,14 @@ class Scorpion {
     _updateEyes() {
         const head = this.spinePoints[0];
         const distToMouse = Math.hypot(this.mouse.x - head.x, this.mouse.y - head.y);
-        let targetGlow = (distToMouse < this.config.head.eyes.glowDistance && !this.isGrabbed) ? 1 : 0;
+        let targetGlow = (distToMouse < this.config.head.eyes.glowDistance && this.state !== 'GRABBED') ? 1 : 0;
         this.eyeGlow += (targetGlow - this.eyeGlow) * this.config.head.eyes.glowLerpFactor;
     }
 
     _updatePincers() {
         const head = this.spinePoints[0]; // La cabeza es el punto de referencia
-        const distToMouse = Math.hypot(this.mouse.x - head.x, this.mouse.y - head.y); // Distancia del cursor a la cabeza
-        const isClosing = (distToMouse < this.config.pincers.snapDistance && !this.isGrabbed);
+        const distToMouse = Math.hypot(this.mouse.x - head.x, this.mouse.y - head.y);
+        const isClosing = (distToMouse < this.config.pincers.snapDistance && this.state !== 'GRABBED');
         let targetAngle = isClosing ? this.config.pincers.closedAngle : this.config.pincers.openAngle;
 
         // Detectar si las pinzas se acaban de cerrar para crear un destello
@@ -643,7 +664,7 @@ class Scorpion {
 
     _updatePincerPhysics() {
         // --- OPTIMIZACIÓN: No calcular la física de las pinzas si el escorpión está siendo arrastrado ---
-        if (!this.isGrabbed) {
+        if (this.state !== 'GRABBED') {
             const PINCER_FOLLOW_LERP_FACTOR = 0.2; 
     
             for (let side = -1; side <= 1; side += 2) {
@@ -697,7 +718,7 @@ class Scorpion {
         const height = this.canvas.height / this.dpr;
         this.ctx.clearRect(0, 0, width, height);
 
-        if (this.isDeconstructed || this.isDeconstructing || this.isReconstructing) {
+        if (this.state === 'DECONSTRUCTED' || this.state === 'DECONSTRUCTING' || this.state === 'RECONSTRUCTING') {
             this._drawDeconstructed();
         } else {
             this._drawScorpion();
@@ -729,9 +750,9 @@ class Scorpion {
         });
 
         // Dibujar pinzas desarmadas
-        this.deconstructedParts.filter(p => p.type === 'pincer').forEach(p => {
-            const fromAnchor = this.isReconstructing ? p.targetPos : p.homeAnchor;
-            const toAnchor = this.isReconstructing ? p.homeAnchor : p.targetPos;
+        this.deconstructedParts.filter(p => p.type === 'pincer').forEach(p => { // Corrected filter
+            const fromAnchor = this.state === 'RECONSTRUCTING' ? p.targetPos : p.homeAnchor;
+            const toAnchor = this.state === 'RECONSTRUCTING' ? p.homeAnchor : p.targetPos;
             const anchor = {
                 x: fromAnchor.x + (toAnchor.x - fromAnchor.x) * t,
                 y: fromAnchor.y + (toAnchor.y - fromAnchor.y) * t
@@ -759,8 +780,8 @@ class Scorpion {
             .filter(p => p.type === 'spine')
             .sort((a, b) => a.index - b.index) // Asegurar el orden
             .map(p => {
-                const from = this.isReconstructing ? p.targetPos : p.homePos;
-                const to = this.isReconstructing ? p.homePos : p.targetPos;
+                const from = this.state === 'RECONSTRUCTING' ? p.targetPos : p.homePos;
+                const to = this.state === 'RECONSTRUCTING' ? p.homePos : p.targetPos;
                 return {
                     x: from.x + (to.x - from.x) * t,
                     y: from.y + (to.y - from.y) * t
@@ -1119,7 +1140,7 @@ class Scorpion {
         this.ctx.save();
 
         let strikeAngleOffset = 0;
-        if (this.isStriking) {
+        if (this.state === 'STRIKING') {
             const strikePhase = this.strikeProgress / this.config.strike.duration;
             strikeAngleOffset = Math.sin(strikePhase * Math.PI) * this.config.strike.angleOffset;
         }
@@ -1197,14 +1218,14 @@ function setup() {
     };
 
     const handleClick = () => scorpion.startStrike(); // Función para el ataque
-
+    
     const handleGrab = (e) => {
         if (e.type === 'touchstart') { // Para el toque, actualiza la posición antes de agarrar
             e.preventDefault();
             const { x, y } = getMousePos(e);
             scorpion.updateMouse(x, y);
         }
-        scorpion.startGrab();
+        scorpion.startGrab(); // Call startGrab regardless of mouse button
     };
 
     const handleRelease = (e) => {
@@ -1212,7 +1233,7 @@ function setup() {
         
         // Si se suelta después de arrastrar, no atacar. Si no, es un toque/clic.
         if (scorpion.isGrabbed) {
-            scorpion.endGrab();
+            scorpion.endGrab(); // This will now check the state and transition
         } else {
             handleClick(); // Si no se arrastró, es un toque/clic para atacar
         }
