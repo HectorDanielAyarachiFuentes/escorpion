@@ -47,7 +47,12 @@ class Particle {
         this.life = config.minLife + Math.random() * (config.maxLife - config.minLife);
         this.maxLife = config.maxLife;
         this.hue = (hue + 180) % 360;
-        // Propiedades que no cambian: gravity, drag, saturation, lightness
+        // --- CORREGIDO: Estas propiedades DEBEN cambiar al resetear ---
+        // Diferentes tipos de partículas (polvo, explosión) tienen diferente física.
+        this.gravity = config.gravity || 0.08;
+        this.drag = config.drag;
+        this.saturation = config.saturation;
+        this.lightness = config.glowLightness;
     }
 
     update() {
@@ -207,7 +212,36 @@ class Leg {
         const joint2X = jointX + leg_seg2_len * Math.cos(leg_seg2_angle);
         const joint2Y = jointY + leg_seg2_len * Math.sin(leg_seg2_angle);
 
-        // --- LÓGICA DE DIBUJO DE PATAS MÁS DELGADAS Y ARTICULADAS ---
+        // Dibujar los nodos iluminados en las articulaciones
+        ctx.save();
+        const glowColor = `hsl(${hue}, ${colorConfig.saturation}%, ${colorConfig.glowLightness}%)`;
+
+        // Articulación del cuerpo
+        ctx.beginPath();
+        ctx.arc(startX, startY, 1.8, 0, Math.PI * 2);
+        ctx.fill();
+        // Articulación de la "rodilla"
+        ctx.beginPath();
+        ctx.arc(jointX, jointY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        // Articulación del "tobillo"
+        ctx.beginPath();
+        ctx.arc(joint2X, joint2Y, 1.0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // --- OPTIMIZACIÓN: Dibujar patas con "falso brillo" en lugar de shadowBlur ---
+        // 1. Dibujar el "brillo" (líneas más gruesas y semitransparentes)
+        ctx.save();
+        ctx.strokeStyle = `hsla(${hue}, ${colorConfig.saturation}%, ${colorConfig.lightness}%, 0.2)`;
+        ctx.lineWidth = this.config.legWidth + 4; // Brillo ancho
+        ctx.beginPath();
+        ctx.moveTo(startX, startY); ctx.lineTo(jointX, jointY);
+        ctx.moveTo(jointX, jointY); ctx.lineTo(joint2X, joint2Y);
+        ctx.moveTo(joint2X, joint2Y); ctx.lineTo(footX, footY);
+        ctx.stroke();
+        ctx.restore();
+
+        // 2. Dibujar las patas encima del brillo
         ctx.beginPath();
         ctx.moveTo(startX, startY);
         ctx.lineWidth = this.config.legWidth; // Segmento más grueso
@@ -225,26 +259,6 @@ class Leg {
         ctx.lineWidth = this.config.legWidth * 0.4; // Segmento más fino
         ctx.lineTo(footX, footY); 
         ctx.stroke(); // El pie
-
-        // Dibujar los nodos iluminados en las articulaciones
-        ctx.save();
-        const glowColor = `hsl(${hue}, ${colorConfig.saturation}%, ${colorConfig.glowLightness}%)`;
-        ctx.fillStyle = glowColor;
-        ctx.shadowColor = glowColor;
-        ctx.shadowBlur = 5;
-
-        // Articulación del cuerpo
-        ctx.beginPath();
-        ctx.arc(startX, startY, 1.8, 0, Math.PI * 2);
-        ctx.fill();
-        // Articulación de la "rodilla"
-        ctx.beginPath();
-        ctx.arc(jointX, jointY, 1.5, 0, Math.PI * 2);
-        ctx.fill();
-        // Articulación del "tobillo"
-        ctx.beginPath();
-        ctx.arc(joint2X, joint2Y, 1.0, 0, Math.PI * 2);
-        ctx.fill();
         ctx.restore();
     }
 }
@@ -314,15 +328,6 @@ class Scorpion {
                 legCounter++;
             }
         });
-    }
-
-    _initParticlePool() {
-        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
-            // Creamos partículas "vacías" que se inicializarán cuando se usen.
-            // Usamos una configuración genérica para el constructor inicial.
-            const dummyConfig = { minSpeed: 0, maxSpeed: 0, sprayAngle: 0, minLife: 0, maxLife: 1, drag: 1, gravity: 0, saturation: 0, glowLightness: 0 };
-            this.particlePool.push(new Particle(0, 0, 0, dummyConfig, 0));
-        }
     }
 
     _initParticlePool() {
@@ -896,8 +901,9 @@ class Scorpion {
         const bodyColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
         const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
 
-        // --- Calcula valores una sola vez por fotograma ---
-        const speedGlow = Math.min(this.headSpeed * 0.4, 1.5); // Ligeramente reducido
+        // --- CORRECCIÓN: Volver a añadir la declaración de speedGlow ---
+        const speedGlow = Math.min(this.headSpeed * 0.4, 1.5);
+
         const currentGlowBlur = this.config.color.glowBlur +
                                 Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount +
                                 this.postStrikeGlow +
@@ -906,9 +912,6 @@ class Scorpion {
         this._drawShadow();
 
         this.ctx.strokeStyle = bodyColor; // Usa el color precalculado
-        this.ctx.lineWidth = 1.2;
-        this.ctx.shadowColor = glowColor;
-        this.ctx.shadowBlur = currentGlowBlur; // Usa el valor precalculado
 
         // --- OPTIMIZACIÓN: Reordenar el dibujado para evitar dibujar las patas dos veces ---
         // 1. Dibujar las articulaciones de las pinzas (que van por debajo de las patas)
@@ -922,8 +925,6 @@ class Scorpion {
 
         // --- NUEVA LÓGICA PARA DIBUJAR CUERPO SEGMENTADO ---
         this.ctx.fillStyle = '#000';
-        // --- OPTIMIZACIÓN: El shadowBlur ya está establecido, no es necesario volver a asignarlo. ---
-        // Modificado para recorrer toda la cola, hasta el penúltimo segmento.
         const bodyEndIndex = this.spinePoints.length - 2;
 
         // Dibujar desde la cola hacia la cabeza para que las placas se superpongan correctamente
@@ -954,13 +955,23 @@ class Scorpion {
                 const p2_left = { x: p2.x + width1 * Math.cos(angle1), y: p2.y + width1 * Math.sin(angle1) };
                 const p2_right = { x: p2.x - width1 * Math.cos(angle1), y: p2.y - width1 * Math.sin(angle1) };
 
+                // --- OPTIMIZACIÓN: Dibujar con "falso brillo" ---
+                // 1. Dibujar el brillo (stroke más grueso y semitransparente)
+                this.ctx.save();
+                this.ctx.lineWidth = 3;
+                this.ctx.strokeStyle = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%, 0.3)`;
                 this.ctx.beginPath();
                 this.ctx.moveTo(p1_left.x, p1_left.y);
                 this.ctx.quadraticCurveTo(p2.x, p2.y, p2_left.x, p2_left.y); // Curva hacia el siguiente punto
                 this.ctx.lineTo(p2_right.x, p2_right.y);
                 this.ctx.quadraticCurveTo(p2.x, p2.y, p1_right.x, p1_right.y); // Curva de vuelta
                 this.ctx.closePath();
+                this.ctx.stroke();
+                this.ctx.restore();
+
+                // 2. Dibujar el cuerpo sólido encima
                 this.ctx.fill();
+                this.ctx.lineWidth = 1.2;
                 this.ctx.stroke();
 
                 continue; // Saltar la lógica de dibujo de placas planas
@@ -982,12 +993,20 @@ class Scorpion {
             const p2_right_x = p2.x - width2 * Math.cos(angle2);
             const p2_right_y = p2.y - width2 * Math.sin(angle2);
 
+            // --- OPTIMIZACIÓN: Dibujar con "falso brillo" ---
+            this.ctx.save();
+            this.ctx.lineWidth = 3;
+            this.ctx.strokeStyle = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%, 0.3)`;
             this.ctx.beginPath();
             this.ctx.moveTo(p1_left_x, p1_left_y); this.ctx.lineTo(p2_left_x, p2_left_y);
             this.ctx.lineTo(p2_right_x, p2_right_y); this.ctx.lineTo(p1_right_x, p1_right_y);
             this.ctx.closePath();
+            this.ctx.stroke();
+            this.ctx.restore();
 
+            // 2. Dibujar el cuerpo sólido encima
             this.ctx.fill();
+            this.ctx.lineWidth = 1.2;
             this.ctx.stroke();
 
         }
@@ -1047,10 +1066,20 @@ class Scorpion {
         this.ctx.closePath();
         
         this.ctx.fillStyle = '#000';
+
+        // --- OPTIMIZACIÓN: Dibujar con "falso brillo" ---
+        this.ctx.save();
+        this.ctx.lineWidth = 4;
+        this.ctx.strokeStyle = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%, 0.3)`;
+        this.ctx.stroke();
+        this.ctx.restore();
+
+        // Dibujar el cuerpo sólido encima
         this.ctx.fill();
+        this.ctx.lineWidth = 1.2;
         this.ctx.stroke();
         
-        this._drawEyes(x, y, angle);
+        this._drawEyes(); // Ya está en el espacio de coordenadas de la cabeza
         
         // Restaurar la transformación al final
         this.ctx.restore();
@@ -1061,11 +1090,11 @@ class Scorpion {
         const eyeConfig = this.config.head.eyes;
 
         if (this.eyeGlow > 0.01) {
+            // --- OPTIMIZACIÓN: Usar "falso brillo" para los ojos ---
             const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
-            this.ctx.shadowColor = glowColor;
-            const pulse = Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount;
-            this.ctx.shadowBlur = this.eyeGlow * (15 + pulse);
-            this.ctx.fillStyle = glowColor;
+            const baseColor = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%, ${this.eyeGlow * 0.8})`;
+            const haloColor = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%, ${this.eyeGlow * 0.3})`;
+            this.ctx.fillStyle = baseColor;
         } else {
             this.ctx.fillStyle = '#000';
         }
@@ -1074,6 +1103,14 @@ class Scorpion {
         for (let side = -1; side <= 1; side += 2) {
             const eyeX = eyeConfig.offsetX * this.config.head.size;
             const eyeY = eyeConfig.offsetY * this.config.head.size * side;
+
+            if (this.eyeGlow > 0.01) {
+                this.ctx.beginPath();
+                this.ctx.fillStyle = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%, ${this.eyeGlow * 0.2})`;
+                this.ctx.arc(eyeX, eyeY, eyeConfig.size + 3, 0, Math.PI * 2);
+                this.ctx.fill();
+                this.ctx.fillStyle = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
+            }
 
             this.ctx.beginPath();
             this.ctx.arc(eyeX, eyeY, eyeConfig.size, 0, Math.PI * 2);
@@ -1086,8 +1123,6 @@ class Scorpion {
         this.ctx.save();
         const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
         this.ctx.fillStyle = glowColor;
-        this.ctx.shadowColor = glowColor;
-        this.ctx.shadowBlur = 8;
 
         for (let side = -1; side <= 1; side += 2) {
             const sideKey = side === -1 ? 'left' : 'right';
@@ -1135,11 +1170,20 @@ class Scorpion {
             const armAngle2 = Math.atan2(elbowY - armBaseY, elbowX - armBaseX);
 
             // Dibujar el primer segmento del brazo
-            // --- OPTIMIZACIÓN: Evitar setTransform, save/restore es suficiente y más limpio. ---
+            this.ctx.save();
+            this.ctx.lineWidth = this.config.pincers.armWidth * 0.8 + 4;
+            this.ctx.strokeStyle = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%, 0.2)`;
+            this.ctx.beginPath();
+            this.ctx.moveTo(armBaseX, armBaseY);
+            this.ctx.lineTo(elbowX, elbowY);
+            this.ctx.stroke();
+            this.ctx.restore();
+
             this.ctx.lineWidth = this.config.pincers.armWidth * 0.8;
             this.ctx.beginPath();
             this.ctx.moveTo(armBaseX, armBaseY);
             this.ctx.lineTo(elbowX, elbowY);
+            this.ctx.strokeStyle = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
             this.ctx.stroke();
 
             this.ctx.save();
@@ -1171,6 +1215,14 @@ class Scorpion {
     
             this.ctx.fillStyle = '#000';
             this.ctx.fill();
+
+            this.ctx.save();
+            this.ctx.lineWidth = this.ctx.lineWidth + 3;
+            this.ctx.strokeStyle = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%, 0.3)`;
+            this.ctx.stroke();
+            this.ctx.restore();
+
+            this.ctx.strokeStyle = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
             this.ctx.stroke();
     
             // --- LÓGICA DE DIBUJO DE PINZAS MEJORADA (relativa a la mano) ---
@@ -1192,6 +1244,14 @@ class Scorpion {
             drawClaw(side * this.pincerAngle, fingerLength, side * 0.1, side * 0.3); // Móvil
             drawClaw(-side * 0.4, fingerLength * 0.9, -side * 0.1, -side * 0.3); // Fija
             this.ctx.lineWidth = 4.5;
+            
+            this.ctx.save();
+            this.ctx.lineWidth = this.ctx.lineWidth + 2;
+            this.ctx.strokeStyle = `hsla(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%, 0.4)`;
+            this.ctx.stroke();
+            this.ctx.restore();
+
+            this.ctx.strokeStyle = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
             this.ctx.stroke();
 
             // Resaltar la articulación de la mano
