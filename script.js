@@ -91,6 +91,11 @@ class Leg {
         this.stepStartPos = { x: 0, y: 0 };
         this.stepTargetPos = { x: 0, y: 0 };
         this.currentStepDuration = this.config.stepDuration;
+        // --- OPTIMIZACIÓN: Cache para las posiciones de las articulaciones ---
+        this.joint1 = { x: 0, y: 0 };
+        this.joint2 = { x: 0, y: 0 };
+        this.lift = 0;
+
         this._tempBodyPoint = { x: 0, y: 0 }; // Para la predicción de la posición del cuerpo
     }
 
@@ -103,6 +108,7 @@ class Leg {
     }
 
     update(bodyPoint, bodyAngle, headVelocity, headAngularVelocity, headSpeed, canStep, isGrabbed, onStepCallback) {
+        this.bodyPoint = bodyPoint; // Guardar para usar en el dibujo
         // --- OPTIMIZACIÓN: Usar distancia al cuadrado para evitar Math.hypot ---
         // OPTIMIZACIÓN: Reutilizar un objeto para la posición natural para evitar crear uno nuevo en cada fotograma.
         if (!this._naturalPosCache) this._naturalPosCache = { x: 0, y: 0 };
@@ -158,6 +164,42 @@ class Leg {
                 this._getNaturalRestingPos(this._tempBodyPoint, predictedBodyAngle, 1.0, this.stepTargetPos);
             }
         }
+
+        // --- OPTIMIZACIÓN: Mover los cálculos de IK de draw() a update() ---
+        // Estos cálculos solo necesitan hacerse una vez por fotograma, no en cada redibujado.
+        const startX = this.bodyPoint.x;
+        const startY = this.bodyPoint.y;
+        let footX = this.footPos.x;
+        let footY = this.footPos.y;
+
+        this.lift = 0;
+        if (this.isStepping) {
+            this.lift = Math.sin(this.stepProgress / this.currentStepDuration * Math.PI) * this.config.stepLift;
+        }
+        footY -= this.lift; // Aplicar elevación para el cálculo de IK
+
+        const seg1_len = this.config.segment1;
+        const seg2_len = this.config.segment2 + this.config.segment3;
+        const dist = Math.hypot(startX - footX, startY - footY);
+        const MAX_REACH_OFFSET = 1;
+        const maxReach = seg1_len + seg2_len - MAX_REACH_OFFSET;
+
+        if (dist >= maxReach) {
+            const angle = Math.atan2(footY - startY, footX - startX);
+            this.joint1.x = startX + seg1_len * Math.cos(angle);
+            this.joint1.y = startY + seg1_len * Math.sin(angle);
+        } else {
+            const angle_at_body = Math.acos((seg1_len**2 + dist**2 - seg2_len**2) / (2 * seg1_len * dist));
+            const angle_body_to_foot = Math.atan2(footY - startY, footX - startX);
+            const jointAngle = angle_body_to_foot + (angle_at_body * this.side);
+            this.joint1.x = startX + seg1_len * Math.cos(jointAngle);
+            this.joint1.y = startY + seg1_len * Math.sin(jointAngle);
+        }
+
+        const leg_seg2_angle = Math.atan2(footY - this.joint1.y, footX - this.joint1.x);
+        const leg_seg2_len = this.config.segment2;
+        this.joint2.x = this.joint1.x + leg_seg2_len * Math.cos(leg_seg2_angle);
+        this.joint2.y = this.joint1.y + leg_seg2_len * Math.sin(leg_seg2_angle);
     }
 
     draw(ctx, bodyPoint, hue, colorConfig) {
@@ -165,56 +207,22 @@ class Leg {
         
         const startX = bodyPoint.x;
         const startY = bodyPoint.y;
-        let footX = this.footPos.x;
-        let footY = this.footPos.y;
-
-        let lift = 0;
-        if (this.isStepping) {
-            lift = Math.sin(this.stepProgress / this.currentStepDuration * Math.PI) * this.config.stepLift;
-        }
+        const footX = this.footPos.x;
+        const footY = this.footPos.y;
 
         const FOOT_SHADOW_LIFT_THRESHOLD = 0.1;
-        if (lift > FOOT_SHADOW_LIFT_THRESHOLD) {
+        if (this.lift > FOOT_SHADOW_LIFT_THRESHOLD) {
             ctx.beginPath();
             ctx.arc(footX, footY, 1.5, 0, Math.PI * 2); // Sombra del pie
             ctx.fillStyle = 'rgba(0,0,0,0.4)'; // Color de la sombra
             ctx.fill();
         }
-        footY -= lift;
-
-        const seg1_len = this.config.segment1;
-        const seg2_len = this.config.segment2 + this.config.segment3;
-        const dist = Math.hypot(startX - footX, startY - footY);
-        const MAX_REACH_OFFSET = 1; // Evita que la pata se estire completamente y cause "popping"
-        const maxReach = seg1_len + seg2_len - MAX_REACH_OFFSET;
-        let jointX, jointY;
-
-        // --- Lógica de Cinemática Inversa (IK) para la rodilla ---
-        // Si la distancia al pie es mayor que el alcance máximo, la pata se estira completamente.
-        if (dist >= maxReach) {
-            const angle = Math.atan2(footY - startY, footX - startX);
-            jointX = startX + seg1_len * Math.cos(angle);
-            jointY = startY + seg1_len * Math.sin(angle);
-        } else {
-            // Si el pie está al alcance, se calcula la posición de la rodilla usando la ley de los cosenos
-            // para formar un triángulo entre el cuerpo, la rodilla y el pie.
-            const angle_at_body = Math.acos((seg1_len**2 + dist**2 - seg2_len**2) / (2 * seg1_len * dist));
-            const angle_body_to_foot = Math.atan2(footY - startY, footX - startX);
-            // El ángulo de la articulación se ajusta por `this.side` para que las rodillas apunten hacia afuera.
-            const jointAngle = angle_body_to_foot + (angle_at_body * this.side);
-
-            jointX = startX + seg1_len * Math.cos(jointAngle);
-            jointY = startY + seg1_len * Math.sin(jointAngle);
-        }
-
-        const leg_seg2_angle = Math.atan2(footY - jointY, footX - jointX);
-        const leg_seg2_len = this.config.segment2;
-        const joint2X = jointX + leg_seg2_len * Math.cos(leg_seg2_angle);
-        const joint2Y = jointY + leg_seg2_len * Math.sin(leg_seg2_angle);
+        const liftedFootY = footY - this.lift;
 
         // Dibujar los nodos iluminados en las articulaciones
         ctx.save();
         const glowColor = `hsl(${hue}, ${colorConfig.saturation}%, ${colorConfig.glowLightness}%)`;
+        ctx.fillStyle = glowColor;
 
         // Articulación del cuerpo
         ctx.beginPath();
@@ -222,11 +230,11 @@ class Leg {
         ctx.fill();
         // Articulación de la "rodilla"
         ctx.beginPath();
-        ctx.arc(jointX, jointY, 1.5, 0, Math.PI * 2);
+        ctx.arc(this.joint1.x, this.joint1.y, 1.5, 0, Math.PI * 2);
         ctx.fill();
         // Articulación del "tobillo"
         ctx.beginPath();
-        ctx.arc(joint2X, joint2Y, 1.0, 0, Math.PI * 2);
+        ctx.arc(this.joint2.x, this.joint2.y, 1.0, 0, Math.PI * 2);
         ctx.fill();
 
         // --- OPTIMIZACIÓN: Dibujar patas con "falso brillo" en lugar de shadowBlur ---
@@ -235,9 +243,9 @@ class Leg {
         ctx.strokeStyle = `hsla(${hue}, ${colorConfig.saturation}%, ${colorConfig.lightness}%, 0.2)`;
         ctx.lineWidth = this.config.legWidth + 4; // Brillo ancho
         ctx.beginPath();
-        ctx.moveTo(startX, startY); ctx.lineTo(jointX, jointY);
-        ctx.moveTo(jointX, jointY); ctx.lineTo(joint2X, joint2Y);
-        ctx.moveTo(joint2X, joint2Y); ctx.lineTo(footX, footY);
+        ctx.moveTo(startX, startY); ctx.lineTo(this.joint1.x, this.joint1.y);
+        ctx.moveTo(this.joint1.x, this.joint1.y); ctx.lineTo(this.joint2.x, this.joint2.y);
+        ctx.moveTo(this.joint2.x, this.joint2.y); ctx.lineTo(footX, liftedFootY);
         ctx.stroke();
         ctx.restore();
 
@@ -245,19 +253,19 @@ class Leg {
         ctx.beginPath();
         ctx.moveTo(startX, startY);
         ctx.lineWidth = this.config.legWidth; // Segmento más grueso
-        ctx.lineTo(jointX, jointY); // Rodilla
+        ctx.lineTo(this.joint1.x, this.joint1.y); // Rodilla
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.moveTo(jointX, jointY);
+        ctx.moveTo(this.joint1.x, this.joint1.y);
         ctx.lineWidth = this.config.legWidth * 0.7; // Segmento intermedio
-        ctx.lineTo(joint2X, joint2Y); // Tobillo
+        ctx.lineTo(this.joint2.x, this.joint2.y); // Tobillo
         ctx.stroke();
 
         ctx.beginPath();
-        ctx.moveTo(joint2X, joint2Y);
+        ctx.moveTo(this.joint2.x, this.joint2.y);
         ctx.lineWidth = this.config.legWidth * 0.4; // Segmento más fino
-        ctx.lineTo(footX, footY); 
+        ctx.lineTo(footX, liftedFootY); 
         ctx.stroke(); // El pie
         ctx.restore();
     }
