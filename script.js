@@ -119,37 +119,6 @@ const config = {
     }
 };
 
-// --- Estado de la Animación (agrupado) ---
-const dpr = window.devicePixelRatio || 1;
-let animationFrame = 0;
-
-const state = {
-    mouse: { x: 0, y: 0 },
-    targetPos: { x: 0, y: 0 },
-    spinePoints: [],
-    headSpeed: 0,
-    legs: [],
-    isStriking: false,
-    strikeProgress: 0,
-    strikeTarget: { x: 0, y: 0 },
-    headVelocity: { x: 0, y: 0 }, // Guardar la velocidad de la cabeza para la predicción de las patas
-    headAngularVelocity: 0, // Guardar la velocidad de giro para la predicción
-    headAngle: 0, // Ángulo de la cabeza, actualizado cada frame
-    lastHeadAngle: 0, 
-    currentHue: 0, 
-    particles: [],
-    isGrabbed: false,
-    grabbedPointIndex: -1,
-    postStrikeGlow: 0, // Intensidad actual del brillo post-ataque
-    eyeGlow: 0, // Intensidad del brillo de los ojos (0 a 1)
-};
-state.lastPincerAngle = config.pincers.openAngle;
-state.pincerAngle = config.pincers.openAngle; // Estado inicial de las pinzas
-
-function initAnimationState() {
-    // Esta función será reemplazada por el constructor de la clase Scorpion
-}
-
 // =====================================================================
 // ===               REFACTORIZACIÓN A CLASES (NUEVO)                ===
 // =====================================================================
@@ -199,8 +168,8 @@ class Leg {
         this.config = config;
         this.angle = angle; // Ángulo específico para este par de patas
         
-        const naturalPos = this._getNaturalRestingPos(initialBodyPoint, initialBodyAngle, 1.0);
-        this.footPos = { x: naturalPos.x, y: naturalPos.y };
+        this.footPos = { x: 0, y: 0 };
+        this._getNaturalRestingPos(initialBodyPoint, initialBodyAngle, 1.0, this.footPos);
         
         this.isStepping = false;
         this.stepProgress = 0;
@@ -209,18 +178,20 @@ class Leg {
         this.currentStepDuration = this.config.stepDuration;
     }
 
-    _getNaturalRestingPos(bodyPoint, bodyAngle, scale) {
+    _getNaturalRestingPos(bodyPoint, bodyAngle, scale, out) {
         const angle = bodyAngle + this.side * this.angle;
         const len = this.config.naturalLength * scale;
-        return {
-            x: bodyPoint.x + len * Math.cos(angle),
-            y: bodyPoint.y + len * Math.sin(angle),
-        };
+        out.x = bodyPoint.x + len * Math.cos(angle);
+        out.y = bodyPoint.y + len * Math.sin(angle);
+        return out;
     }
 
     update(bodyPoint, bodyAngle, headVelocity, headAngularVelocity, headSpeed, canStep, isGrabbed, onStepCallback) {
         // --- OPTIMIZACIÓN: Usar distancia al cuadrado para evitar Math.hypot ---
-        const naturalPos = this._getNaturalRestingPos(bodyPoint, bodyAngle, 1.0);
+        // OPTIMIZACIÓN: Reutilizar un objeto para la posición natural para evitar crear uno nuevo en cada fotograma.
+        if (!this._naturalPosCache) this._naturalPosCache = { x: 0, y: 0 };
+        const naturalPos = this._getNaturalRestingPos(bodyPoint, bodyAngle, 1.0, this._naturalPosCache);
+
         const dx = this.footPos.x - naturalPos.x;
         const dy = this.footPos.y - naturalPos.y;
         const distSqFromNatural = dx * dx + dy * dy;
@@ -265,7 +236,7 @@ class Leg {
                 }
 
                 const predictedBodyAngle = bodyAngle + headAngularVelocity * predictionFrames;
-                this.stepTargetPos = this._getNaturalRestingPos({ x: predictedBodyX, y: predictedBodyY }, predictedBodyAngle, 1.0);
+                this._getNaturalRestingPos({ x: predictedBodyX, y: predictedBodyY }, predictedBodyAngle, 1.0, this.stepTargetPos);
             }
         }
     }
@@ -602,8 +573,8 @@ class Scorpion {
             }
         }
 
-        this.headVelocity = { x: head.x - oldHeadX, y: head.y - oldHeadY };
-        this.headSpeed = Math.hypot(this.headVelocity.x, this.headVelocity.y);
+        this._updateHeadVelocity(head.x, oldHeadX, head.y, oldHeadY);
+        this.headSpeed = Math.hypot(this.headVelocity.x, this.headVelocity.y); // hypot es necesario aquí para la velocidad real
 
         if (this.headSpeed > 0.1) {
             this.headAngle = Math.atan2(this.headVelocity.y, this.headVelocity.x);
@@ -614,9 +585,9 @@ class Scorpion {
         this.lastHeadAngle = this.headAngle;
     }
 
-    _updateHeadVelocity(newX, newY, oldX, oldY) {
+    _updateHeadVelocity(newX, oldX, newY, oldY) {
         this.headVelocity.x = newX - oldX;
-        this.headVelocity.y = newY - oldY;
+        this.headVelocity.y = newY - oldY; 
     }
 
     _updateSpinePhysics() {
@@ -1157,10 +1128,8 @@ class Scorpion {
             const handY = joints.hand.y;
 
             // --- OPTIMIZACIÓN: Usar transformaciones en lugar de cálculos manuales ---
-            this.ctx.save();
-            this.ctx.translate(elbowX, elbowY);
             const armAngle = Math.atan2(handY - elbowY, handX - elbowX);
-            this.ctx.rotate(armAngle);
+            const armAngle2 = Math.atan2(elbowY - armBaseY, elbowX - armBaseX);
 
             // Dibujar el primer segmento del brazo
             // --- OPTIMIZACIÓN: Evitar setTransform, save/restore es suficiente y más limpio. ---
@@ -1169,6 +1138,10 @@ class Scorpion {
             this.ctx.moveTo(armBaseX, armBaseY);
             this.ctx.lineTo(elbowX, elbowY);
             this.ctx.stroke();
+
+            this.ctx.save();
+            this.ctx.translate(elbowX, elbowY);
+            this.ctx.rotate(armAngle);
 
             // Dibujar la "mano" (quela) - ahora relativa al codo (0,0)
             this.ctx.beginPath();
@@ -1278,6 +1251,7 @@ let scorpion;
 let animationLoopId;
 
 function setup() {
+    const dpr = window.devicePixelRatio || 1;
     canvas.width = window.innerWidth * dpr;
     canvas.height = window.innerHeight * dpr;
     canvas.style.width = `${window.innerWidth}px`;
