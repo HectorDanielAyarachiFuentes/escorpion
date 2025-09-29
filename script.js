@@ -176,6 +176,7 @@ class Leg {
         this.stepStartPos = { x: 0, y: 0 };
         this.stepTargetPos = { x: 0, y: 0 };
         this.currentStepDuration = this.config.stepDuration;
+        this._tempBodyPoint = { x: 0, y: 0 }; // Para la predicción de la posición del cuerpo
     }
 
     _getNaturalRestingPos(bodyPoint, bodyAngle, scale, out) {
@@ -236,7 +237,9 @@ class Leg {
                 }
 
                 const predictedBodyAngle = bodyAngle + headAngularVelocity * predictionFrames;
-                this._getNaturalRestingPos({ x: predictedBodyX, y: predictedBodyY }, predictedBodyAngle, 1.0, this.stepTargetPos);
+                this._tempBodyPoint.x = predictedBodyX;
+                this._tempBodyPoint.y = predictedBodyY;
+                this._getNaturalRestingPos(this._tempBodyPoint, predictedBodyAngle, 1.0, this.stepTargetPos);
             }
         }
     }
@@ -877,13 +880,17 @@ class Scorpion {
             if (width1 < 0.5) continue;
             const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x) + Math.PI / 2;
             const angle2 = Math.atan2(p1.y - tempSpinePoints[i-2].y, p1.x - tempSpinePoints[i-2].x) + Math.PI / 2;
-            const p1_left = { x: p1.x + width1 * Math.cos(angle1), y: p1.y + width1 * Math.sin(angle1) };
-            const p1_right = { x: p1.x - width1 * Math.cos(angle1), y: p1.y - width1 * Math.sin(angle1) };
-            const p2_left = { x: p2.x + width2 * Math.cos(angle2), y: p2.y + width2 * Math.sin(angle2) };
-            const p2_right = { x: p2.x - width2 * Math.cos(angle2), y: p2.y - width2 * Math.sin(angle2) };
+            const p1_left_x = p1.x + width1 * Math.cos(angle1);
+            const p1_left_y = p1.y + width1 * Math.sin(angle1);
+            const p1_right_x = p1.x - width1 * Math.cos(angle1);
+            const p1_right_y = p1.y - width1 * Math.sin(angle1);
+            const p2_left_x = p2.x + width2 * Math.cos(angle2);
+            const p2_left_y = p2.y + width2 * Math.sin(angle2);
+            const p2_right_x = p2.x - width2 * Math.cos(angle2);
+            const p2_right_y = p2.y - width2 * Math.sin(angle2);
             this.ctx.beginPath();
-            this.ctx.moveTo(p1_left.x, p1_left.y); this.ctx.lineTo(p2_left.x, p2_left.y);
-            this.ctx.lineTo(p2_right.x, p2_right.y); this.ctx.lineTo(p1_right.x, p1_right.y);
+            this.ctx.moveTo(p1_left_x, p1_left_y); this.ctx.lineTo(p2_left_x, p2_left_y);
+            this.ctx.lineTo(p2_right_x, p2_right_y); this.ctx.lineTo(p1_right_x, p1_right_y);
             this.ctx.closePath();
             this.ctx.fill(); this.ctx.stroke();
         }
@@ -898,18 +905,19 @@ class Scorpion {
         const bodyColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.lightness}%)`;
         const glowColor = `hsl(${this.currentHue}, ${this.config.color.saturation}%, ${this.config.color.glowLightness}%)`;
 
+        // --- Calcula valores una sola vez por fotograma ---
+        const speedGlow = Math.min(this.headSpeed * 0.4, 1.5); // Ligeramente reducido
+        const currentGlowBlur = this.config.color.glowBlur +
+                                Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount +
+                                this.postStrikeGlow +
+                                speedGlow;
+
         this._drawShadow();
 
-        this.ctx.strokeStyle = bodyColor;
+        this.ctx.strokeStyle = bodyColor; // Usa el color precalculado
         this.ctx.lineWidth = 1.2;
         this.ctx.shadowColor = glowColor;
-        
-        // Brillo dinámico basado en el movimiento
-        const speedGlow = Math.min(this.headSpeed * 0.4, 1.5); // Ligeramente reducido
-        this.ctx.shadowBlur = this.config.color.glowBlur + 
-                              Math.sin(this.animationFrame * this.config.color.glowPulseSpeed) * this.config.color.glowPulseAmount + 
-                              this.postStrikeGlow +
-                              speedGlow;
+        this.ctx.shadowBlur = currentGlowBlur; // Usa el valor precalculado
 
         // --- OPTIMIZACIÓN: Reordenar el dibujado para evitar dibujar las patas dos veces ---
         // 1. Dibujar las articulaciones de las pinzas (que van por debajo de las patas)
@@ -972,16 +980,20 @@ class Scorpion {
             const angle1 = Math.atan2(p2.y - p1.y, p2.x - p1.x) + Math.PI / 2;
             // --- OPTIMIZACIÓN: Reutilizar ángulo para evitar Math.atan2 en el bucle ---
             // La diferencia visual es mínima, pero el rendimiento mejora.
-            const angle2 = angle1; 
+            const angle2 = angle1;
 
-            const p1_left = { x: p1.x + width1 * Math.cos(angle1), y: p1.y + width1 * Math.sin(angle1) };
-            const p1_right = { x: p1.x - width1 * Math.cos(angle1), y: p1.y - width1 * Math.sin(angle1) };
-            const p2_left = { x: p2.x + width2 * Math.cos(angle2), y: p2.y + width2 * Math.sin(angle2) };
-            const p2_right = { x: p2.x - width2 * Math.cos(angle2), y: p2.y - width2 * Math.sin(angle2) };
+            const p1_left_x = p1.x + width1 * Math.cos(angle1);
+            const p1_left_y = p1.y + width1 * Math.sin(angle1);
+            const p1_right_x = p1.x - width1 * Math.cos(angle1);
+            const p1_right_y = p1.y - width1 * Math.sin(angle1);
+            const p2_left_x = p2.x + width2 * Math.cos(angle2);
+            const p2_left_y = p2.y + width2 * Math.sin(angle2);
+            const p2_right_x = p2.x - width2 * Math.cos(angle2);
+            const p2_right_y = p2.y - width2 * Math.sin(angle2);
 
             this.ctx.beginPath();
-            this.ctx.moveTo(p1_left.x, p1_left.y); this.ctx.lineTo(p2_left.x, p2_left.y);
-            this.ctx.lineTo(p2_right.x, p2_right.y); this.ctx.lineTo(p1_right.x, p1_right.y);
+            this.ctx.moveTo(p1_left_x, p1_left_y); this.ctx.lineTo(p2_left_x, p2_left_y);
+            this.ctx.lineTo(p2_right_x, p2_right_y); this.ctx.lineTo(p1_right_x, p1_right_y);
             this.ctx.closePath();
 
             this.ctx.fill();
@@ -1149,17 +1161,21 @@ class Scorpion {
             const armWidth = this.config.pincers.armWidth;
             const handDist = Math.hypot(handX - elbowX, handY - elbowY);
 
-            const p_base_in = { x: 0, y: -side * armWidth/2 };
-            const p_base_out = { x: 0, y: side * armWidth/2 };
-            const p_hand_in = { x: handDist, y: -side * handWidth/2 };
-            const p_hand_out = { x: handDist, y: side * handWidth/2 };
-            const p_hand_out_ctrl1 = { x: handDist - handWidth * 0.2, y: side * handWidth * 0.8 };
-            const p_hand_out_ctrl2 = { x: handDist * 0.2, y: side * armWidth/2 };
+            const p_base_in_y = -side * armWidth/2;
+            const p_base_out_y = side * armWidth/2;
+            const p_hand_in_x = handDist;
+            const p_hand_in_y = -side * handWidth/2;
+            const p_hand_out_x = handDist;
+            const p_hand_out_y = side * handWidth/2;
+            const p_hand_out_ctrl1_x = handDist - handWidth * 0.2;
+            const p_hand_out_ctrl1_y = side * handWidth * 0.8;
+            const p_hand_out_ctrl2_x = handDist * 0.2;
+            const p_hand_out_ctrl2_y = side * armWidth/2;
 
-            this.ctx.moveTo(p_base_in.x, p_base_in.y);
-            this.ctx.lineTo(p_hand_in.x, p_hand_in.y);
-            this.ctx.bezierCurveTo(p_hand_in.x, p_hand_in.y, p_hand_out_ctrl1.x, p_hand_out_ctrl1.y, p_hand_out.x, p_hand_out.y);
-            this.ctx.bezierCurveTo(p_hand_out_ctrl2.x, p_hand_out_ctrl2.y, p_base_out.x, p_base_out.y, p_base_out.x, p_base_out.y);
+            this.ctx.moveTo(0, p_base_in_y);
+            this.ctx.lineTo(p_hand_in_x, p_hand_in_y);
+            this.ctx.bezierCurveTo(p_hand_in_x, p_hand_in_y, p_hand_out_ctrl1_x, p_hand_out_ctrl1_y, p_hand_out_x, p_hand_out_y);
+            this.ctx.bezierCurveTo(p_hand_out_ctrl2_x, p_hand_out_ctrl2_y, 0, p_base_out_y, 0, p_base_out_y);
             this.ctx.closePath();
     
             this.ctx.fillStyle = '#000';
