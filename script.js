@@ -7,6 +7,13 @@ const ctx = canvas.getContext('2d');
 // ===               REFACTORIZACIÓN A CLASES (NUEVO)                ===
 // =====================================================================
 
+/**
+ * --- NUEVO: Configuración del Pool de Partículas ---
+ * Define el número máximo de partículas que pueden existir a la vez.
+ * Esto pre-asigna memoria y evita la creación de nuevos objetos durante la animación.
+ */
+const PARTICLE_POOL_SIZE = 200;
+
 class Particle {
     constructor(x, y, angle, config, hue) {
         const speed = config.minSpeed + Math.random() * (config.maxSpeed - config.minSpeed);
@@ -23,6 +30,24 @@ class Particle {
         this.hue = (hue + 180) % 360;
         this.saturation = config.saturation;
         this.lightness = config.glowLightness;
+    }
+
+    /**
+     * --- NUEVO: Método de reinicio para el pool de objetos ---
+     * En lugar de crear una nueva partícula, reutilizamos una existente
+     * reseteando sus propiedades.
+     */
+    reset(x, y, angle, config, hue) {
+        const speed = config.minSpeed + Math.random() * (config.maxSpeed - config.minSpeed);
+        const sprayAngle = angle + (Math.random() - 0.5) * config.sprayAngle;
+        
+        this.x = x; this.y = y;
+        this.vx = Math.cos(sprayAngle) * speed;
+        this.vy = Math.sin(sprayAngle) * speed;
+        this.life = config.minLife + Math.random() * (config.maxLife - config.minLife);
+        this.maxLife = config.maxLife;
+        this.hue = (hue + 180) % 360;
+        // Propiedades que no cambian: gravity, drag, saturation, lightness
     }
 
     update() {
@@ -265,7 +290,11 @@ class Scorpion {
         this.deconstructionProgress = 0;
         this.deconstructedParts = [];
 
-        this.particles = [];
+        // --- MODIFICADO: Implementación del Pool de Partículas ---
+        this.activeParticles = [];
+        this.particlePool = [];
+        this._initParticlePool();
+
         this._initLegs();
         this._updatePincerPhysics(); // Asegura que las pinzas tengan una posición inicial
     }
@@ -285,6 +314,24 @@ class Scorpion {
                 legCounter++;
             }
         });
+    }
+
+    _initParticlePool() {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            // Creamos partículas "vacías" que se inicializarán cuando se usen.
+            // Usamos una configuración genérica para el constructor inicial.
+            const dummyConfig = { minSpeed: 0, maxSpeed: 0, sprayAngle: 0, minLife: 0, maxLife: 1, drag: 1, gravity: 0, saturation: 0, glowLightness: 0 };
+            this.particlePool.push(new Particle(0, 0, 0, dummyConfig, 0));
+        }
+    }
+
+    _initParticlePool() {
+        for (let i = 0; i < PARTICLE_POOL_SIZE; i++) {
+            // Creamos partículas "vacías" que se inicializarán cuando se usen.
+            // Usamos una configuración genérica para el constructor inicial.
+            const dummyConfig = { minSpeed: 0, maxSpeed: 0, sprayAngle: 0, minLife: 0, maxLife: 1, drag: 1, gravity: 0, saturation: 0, glowLightness: 0 };
+            this.particlePool.push(new Particle(0, 0, 0, dummyConfig, 0));
+        }
     }
 
     // --- Métodos de control de eventos ---
@@ -619,22 +666,41 @@ class Scorpion {
     }
 
     _createParticleExplosion(x, y, angle) {
+        // --- MODIFICADO: Usa el pool de partículas ---
         for (let i = 0; i < this.config.particles.count; i++) {
-            this.particles.push(new Particle(x, y, angle, this.config.particles, this.currentHue));
+            const particle = this.particlePool.pop();
+            if (particle) {
+                particle.reset(x, y, angle, this.config.particles, this.currentHue);
+                this.activeParticles.push(particle);
+            }
         }
     }
 
     _createDustPuff(x, y) {
+        // --- MODIFICADO: Usa el pool de partículas ---
         const config = this.config.dust;
         for (let i = 0; i < config.count; i++) {
             // El ángulo base es hacia arriba (-PI/2)
             const angle = -Math.PI / 2;
-            this.particles.push(new Particle(x, y, angle, config, this.currentHue));
+            const particle = this.particlePool.pop();
+            if (particle) {
+                particle.reset(x, y, angle, config, this.currentHue);
+                this.activeParticles.push(particle);
+            }
         }
     }
 
     _updateParticles() {
-        this.particles = this.particles.filter(p => p.update());
+        // --- MODIFICADO: Recicla las partículas en lugar de filtrarlas ---
+        for (let i = this.activeParticles.length - 1; i >= 0; i--) {
+            const p = this.activeParticles[i];
+            if (!p.update()) {
+                // La partícula ha muerto, la devolvemos al pool
+                this.particlePool.push(p);
+                // La eliminamos de la lista activa de forma eficiente
+                this.activeParticles.splice(i, 1);
+            }
+        }
     }
 
     _updateEyes() {
@@ -706,12 +772,17 @@ class Scorpion {
             const handX = joints.hand.x;
             const handY = joints.hand.y;
             const config = this.config.pincerFlash;
+            // --- MODIFICADO: Usa el pool de partículas ---
             for (let i = 0; i < config.count; i++) {
-                this.particles.push(new Particle(handX, handY, Math.random() * Math.PI * 2, config, this.currentHue));
+                const particle = this.particlePool.pop();
+                if (particle) {
+                    particle.reset(handX, handY, Math.random() * Math.PI * 2, config, this.currentHue);
+                    this.activeParticles.push(particle);
+                }
             }
         }
     }
-
+    
     // --- Métodos de Dibujo ---
     draw() {
         const width = this.canvas.width / this.dpr;
@@ -932,7 +1003,7 @@ class Scorpion {
 
     _drawParticles() {
         this.ctx.save();
-        this.particles.forEach(p => p.draw(this.ctx)); // El shadowBlur del escorpión no afecta a las partículas
+        this.activeParticles.forEach(p => p.draw(this.ctx)); // El shadowBlur del escorpión no afecta a las partículas
         this.ctx.restore();
     }
 
