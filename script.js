@@ -1264,5 +1264,14 @@ function loop() {
     animationLoopId = requestAnimationFrame(loop);
 }
 
+// --- NUEVO: Pausar la animación cuando la pestaña no está activa ---
+document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+        cancelAnimationFrame(animationLoopId); // Pausa el bucle
+    } else {
+        loop(); // Reanuda el bucle
+    }
+});
+
 window.addEventListener('resize', setup);
 setup();
